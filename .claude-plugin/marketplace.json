@@ -1,0 +1,32 @@
+{
+  "name": "kodem",
+  "owner": {
+    "name": "Kodem Security",
+    "email": "support@kodemsecurity.com"
+  },
+  "metadata": {
+    "description": "Marketplace for the standalone Kodem Security Claude Code plugin"
+  },
+  "plugins": [
+    {
+      "name": "kodem-security",
+      "source": "./",
+      "description": "Policy scans before commit, runtime-ranked backlog fixing, and posture reports.",
+      "category": "Developer Tools",
+      "author": {
+        "name": "Kodem Security"
+      },
+      "keywords": [
+        "kodem-security",
+        "security",
+        "sast",
+        "sca",
+        "vulnerabilities",
+        "scanning",
+        "policy",
+        "report",
+        "posture"
+      ]
+    }
+  ]
+}

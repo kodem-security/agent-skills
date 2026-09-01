@@ -1,0 +1,27 @@
+{
+  "name": "kodem-security",
+  "version": "1.0.0",
+  "description": "Kodem security for AI coding agents: policy scans before commit, runtime-ranked backlog fixing, and posture reports, inside Claude Code.",
+  "author": {
+    "name": "Kodem Security",
+    "email": "support@kodemsecurity.com",
+    "url": "https://www.kodemsecurity.com"
+  },
+  "homepage": "https://www.kodemsecurity.com",
+  "repository": "https://github.com/kodem-security/agent-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "sca",
+    "sast",
+    "appsec",
+    "policy",
+    "vulnerability",
+    "remediation"
+  ],
+  "skills": [
+    "./skills/kodem-security",
+    "./skills/kodem-backlog-fix",
+    "./skills/kodem-report"
+  ]
+}
