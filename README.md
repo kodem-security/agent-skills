@@ -8,6 +8,10 @@ It bundles three skills — `kodem-security`, `kodem-backlog-fix`, `kodem-report
 — plus the hooks that make prevention run automatically. What each skill does
 and how to ask for it is described in each skill's `SKILL.md`.
 
+Everything Claude Code-specific lives under [`claude/`](claude/). Support for
+other agent platforms will land in sibling directories, so the install
+commands below stay stable as the repository grows.
+
 ## Requirements
 
 `git`, `jq` and `python3` on the PATH. `kodem-cli`, which the plugin installs
@@ -100,4 +104,4 @@ claude plugin marketplace remove kodem
 
 `support@kodemsecurity.com`, or our shared Slack or Teams channel. When
 reporting a problem, quote the plugin version from
-`.claude-plugin/plugin.json`.
+`claude/.claude-plugin/plugin.json`.

@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "kodem-security",
-      "source": "./",
+      "source": "./claude",
       "description": "Policy scans before commit, runtime-ranked backlog fixing, and posture reports.",
       "category": "Developer Tools",
       "author": {
