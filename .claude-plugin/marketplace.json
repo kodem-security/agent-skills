@@ -5,7 +5,7 @@
     "email": "support@kodemsecurity.com"
   },
   "metadata": {
-    "description": "Marketplace for the standalone Kodem Security Claude Code plugin"
+    "description": "Marketplace for the Kodem Security Claude Code plugin"
   },
   "plugins": [
     {

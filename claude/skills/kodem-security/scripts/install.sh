@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install or update kodem-cli. Overwrites every writable copy on PATH so the one
-# that runs gets replaced; installs to ~/.local/bin if none exist. Override with
-# KODEM_CLI_INSTALL_DIR; pin a version via KODEM_CLI_VERSION or $1 (e.g. "v3.8.1").
+# Install or update kodem-cli: replaces every writable copy on PATH, else installs to ~/.local/bin.
+# Usage: install.sh [version]   (or KODEM_CLI_VERSION; KODEM_CLI_INSTALL_DIR overrides the target)
 
 PUBLIC_BASE="https://public.kodemsecurity.com/artifacts/kodem-cli"
 VERSION_SEG="${KODEM_CLI_VERSION:-${1:-latest}}"
 
-# Map the host to a published binary suffix (darwin-arm64, linux-amd64, ...).
-# Windows-on-ARM is rejected — no native build; use WSL or x64 emulation.
 detect_platform() {
   local os="" arch=""
   case "$(uname -s)" in
@@ -29,16 +26,12 @@ detect_platform() {
   echo "${os}-${arch}"
 }
 
-# Resolve to <real-dir>/<basename> so duplicate or symlinked PATH entries collapse.
 canonical_path() {
   local p="$1" dir
   dir=$(cd "$(dirname "$p")" 2>/dev/null && pwd) || dir=$(dirname "$p")
   echo "$dir/$(basename "$p")"
 }
 
-# Echo the file(s) to overwrite: every writable kodem-cli on PATH (so a shadowed
-# copy can't keep the old binary running), or a fresh ~/.local/bin if none exist.
-# KODEM_CLI_INSTALL_DIR overrides. Sets HINT_DIR for the PATH hint.
 HINT_DIR=""
 resolve_targets() {
   local binary_name="$1"
@@ -48,8 +41,6 @@ resolve_targets() {
     return
   fi
 
-  # Skip non-writable copies silently; the post-install check warns only if one
-  # actually shadows the update.
   local p rp seen="" found=false
   while IFS= read -r p; do
     [ -n "$p" ] || continue
@@ -67,6 +58,68 @@ resolve_targets() {
   fi
 }
 
+resolve_symlink() {
+  local p="$1" link hops=0
+  while [ -L "$p" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    link=$(readlink "$p") || return 1
+    case "$link" in
+      /*) p="$link" ;;
+      *)  p="$(dirname "$p")/$link" ;;
+    esac
+  done
+  echo "$p"
+}
+
+# Stage, then mv: a new inode, so macOS doesn't SIGKILL the upgraded binary (exit 137).
+STAGED=""
+replace_binary() {
+  local src="$1" t="$2" dir old
+  dir=$(dirname "$t")
+  [ -d "$t" ] && return 1
+  if [ ! -w "$dir" ]; then
+    [ -f "$t" ] && [ -w "$t" ] || return 1
+    cp "$src" "$t" 2>/dev/null && chmod +x "$t" 2>/dev/null
+    return
+  fi
+  STAGED=$(mktemp "$dir/.kodem-cli.new.XXXXXX" 2>/dev/null) || { STAGED=""; return 1; }
+  if ! { cp "$src" "$STAGED" && chmod 755 "$STAGED"; } 2>/dev/null; then
+    rm -f "$STAGED"; STAGED=""; return 1
+  fi
+  if mv -f "$STAGED" "$t" 2>/dev/null; then
+    STAGED=""; return 0
+  fi
+  # Windows can't overwrite a running .exe but can rename it; one fixed <name>.old, never deleted.
+  case "$t" in
+    *.exe)
+      old="$t.old"
+      if [ -f "$t" ] && [ ! -d "$old" ] && mv -f "$t" "$old" 2>/dev/null; then
+        if mv -f "$STAGED" "$t" 2>/dev/null; then
+          STAGED=""; return 0
+        fi
+        if ! mv -f "$old" "$t" 2>/dev/null; then
+          echo "WARNING: could not restore $t — the previous copy is at $old; rename it back." >&2
+        fi
+      fi
+      ;;
+  esac
+  rm -f "$STAGED"; STAGED=""
+  return 1
+}
+
+smoke_test() {
+  local t="$1" rc=0
+  ( "$t" --help >/dev/null 2>&1; exit $? ) 2>/dev/null || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  if [ "$rc" -eq 137 ] && [ "$(uname -s)" = "Darwin" ]; then
+    echo "WARNING: $t was killed on launch (exit 137, likely code signature). Close any running kodem-cli and re-run this installer." >&2
+  else
+    echo "WARNING: $t --help failed (exit $rc)." >&2
+  fi
+  return 1
+}
+
 main() {
   local platform
   platform=$(detect_platform) || return 1
@@ -80,8 +133,14 @@ main() {
     remote_name="kodem-cli-${platform}"
   fi
 
+  # Only ever delete our own temp files.
+  trap '[ -z "${TMP_DL:-}" ] || rm -f "$TMP_DL"; [ -z "${STAGED:-}" ] || rm -f "$STAGED"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
   local tmp
   tmp=$(mktemp)
+  TMP_DL="$tmp"
   echo "Downloading $remote_name ($VERSION_SEG)..."
   if ! curl -fsSL --retry 3 "$PUBLIC_BASE/$VERSION_SEG/$remote_name" -o "$tmp"; then
     rm -f "$tmp"
@@ -93,25 +152,28 @@ main() {
   local -a targets=()
   while IFS= read -r line; do [ -n "$line" ] && targets+=("$line"); done < <(resolve_targets "$binary_name")
 
-  local t installed_any=false
+  local t real installed_any=false
   for t in "${targets[@]}"; do
     mkdir -p "$(dirname "$t")"
-    if cp "$tmp" "$t" 2>/dev/null && chmod +x "$t" 2>/dev/null; then
+    if ! real=$(resolve_symlink "$t"); then
+      echo "WARNING: skipping $t — its symlink chain doesn't resolve" >&2
+      continue
+    fi
+    if replace_binary "$tmp" "$real"; then
       echo "kodem-cli installed at $t"
+      smoke_test "$real" || true
       installed_any=true
     else
       echo "WARNING: could not write $t" >&2
     fi
   done
-  rm -f "$tmp"
+  rm -f "$tmp"; TMP_DL=""
 
   if [ "$installed_any" != true ]; then
     echo "ERROR: kodem-cli could not be installed to any writable location" >&2
     return 1
   fi
 
-  # Warn if the binary that will run isn't one we wrote (shadowed). Clear bash's
-  # command hash first so the lookup is fresh.
   hash -r 2>/dev/null || true
   local active active_rp matched=false
   active=$(command -v "$binary_name" 2>/dev/null || true)
@@ -125,8 +187,6 @@ main() {
     fi
   fi
 
-  # PATH hint only applies to a fresh/explicit install dir; overwrites are
-  # already reachable.
   [ -n "$HINT_DIR" ] || return 0
   case ":$PATH:" in
     *":$HINT_DIR:"*) ;;
@@ -134,8 +194,7 @@ main() {
       INSTALL_DIR="$HINT_DIR"
       case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*)
-          # Persist to Windows user PATH via SetEnvironmentVariable, not setx —
-          # setx silently truncates PATH at 1024 chars.
+          # Not setx: it silently truncates PATH at 1024 chars.
           win_dir=$(cygpath -w "$INSTALL_DIR")
           if powershell.exe -NoProfile -Command "
             \$cur = [Environment]::GetEnvironmentVariable('Path','User');

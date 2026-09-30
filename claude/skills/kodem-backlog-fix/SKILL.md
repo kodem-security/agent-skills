@@ -228,16 +228,20 @@ Each issue carries the signals you rank and present by:
 - An issue with `status: "open"` is open even if it carries a `dismissReason`
   (e.g. an automatic `new_finding_detected`) — treat `status` as the source of
   truth; don't silently drop it.
-- **Drop issues under `.claude/skills/` and `.claude/plugins/` only.** Those are
-  the two directories Claude Code installs skills and plugins into (locally or
-  repo-scoped), so a finding there is in this tool's own installed files, not the
+- **Drop issues in this tool's own installed files only.** Those are Claude Code's
+  `.claude/skills/` and `.claude/plugins/`, the other hosts' plugin install
+  directories (`.cursor/plugins/`, `.gemini/extensions/`, `.codex/plugins/`), and
+  this tool's own skills — `kodem-security`, `kodem-backlog-fix`, `kodem-report` —
+  in any other host's `skills/` directory (`.cursor/`, `.gemini/`, `.github/`,
+  `.agents/`, `.codex/`). A finding there is in this tool's shipped scripts, not the
   developer's code. Filter those out before ranking — never propose "fixing" the
   skill's own scripts, and don't count them toward the backlog totals you report.
-  **Everything else under `.claude/` is the developer's own code** — `hooks/`,
-  `commands/`, `agents/`, `settings*.json` are hand-written by them, and a
-  hardcoded credential or command injection in `.claude/hooks/deploy.sh` is a real
-  finding. Rank and report those normally.
-  **Say what you dropped.** If you excluded any issue under those two directories,
+  **Everything else under those dot-directories is the developer's own code** —
+  a team's own skills, `.claude/hooks/`, `.cursor/rules/`, `.github/workflows/`,
+  `commands/`, `agents/`, `settings*.json` are hand-written by them, and a hardcoded credential or command
+  injection in `.claude/hooks/deploy.sh` is a real finding. Rank and report those
+  normally.
+  **Say what you dropped.** If you excluded any issue under those directories,
   state how many and that they are the tool's own files — a total that silently
   disagrees with the platform's is worse than a slightly longer sentence.
 

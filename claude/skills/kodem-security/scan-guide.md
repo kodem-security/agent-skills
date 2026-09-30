@@ -63,6 +63,13 @@ binary is shadowed on PATH by an older copy; the installer prints a
 file to remove. Surface that path to the user, then continue with the
 current results.
 
+If kodem-cli exits with code **137** (`SIGKILL`, often "Code Signature
+Invalid") right after an update on macOS, an older installer overwrote the
+binary in place while a copy was still running, and macOS rejects its cached
+signature. Tell the user to close any running kodem-cli and run the installer
+again — it now writes a fresh file, so the rerun fixes it. The installer's
+`kodem-cli ... was killed on launch (exit 137)` warning points to the same fix.
+
 ## Reading results
 
 The CLI outputs human-readable text. Open-source results show a table with

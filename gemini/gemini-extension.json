@@ -1,0 +1,5 @@
+{
+  "name": "kodem-security",
+  "version": "1.0.1",
+  "description": "Kodem security for AI coding agents: policy scans before commit, runtime-ranked backlog fixing, and posture reports, inside Gemini CLI."
+}

@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "kodem-capture-baseline",
+            "type": "command",
+            "command": "bash \"${extensionPath}${/}hooks${/}capture-baseline.sh\" --platform gemini",
+            "description": "Snapshot the working tree so the end-of-turn gate reviews only this turn's changes.",
+            "timeout": 120000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "kodem-end-of-turn-review",
+            "type": "command",
+            "command": "bash \"${extensionPath}${/}hooks${/}end-of-turn-review.sh\" --platform gemini",
+            "description": "Kodem policy gate: scan this turn's changes and send policy-blocked findings back to the agent.",
+            "timeout": 600000
+          }
+        ]
+      }
+    ]
+  }
+}

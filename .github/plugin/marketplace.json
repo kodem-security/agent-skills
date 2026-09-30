@@ -1,0 +1,17 @@
+{
+  "name": "kodem",
+  "owner": {
+    "name": "Kodem Security",
+    "email": "support@kodemsecurity.com"
+  },
+  "metadata": {
+    "description": "Marketplace for the Kodem Security GitHub Copilot plugin"
+  },
+  "plugins": [
+    {
+      "name": "kodem-security",
+      "source": "./copilot",
+      "description": "Policy scans before commit, runtime-ranked backlog fixing, and posture reports."
+    }
+  ]
+}

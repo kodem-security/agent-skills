@@ -146,11 +146,13 @@ it, then add the judgment a script can't:
 - Narrate the missing signals the script flagged (see Missing signals).
 - **Never alter the script's numbers, list, or ranking.** If something looks
   wrong, say so — don't silently "fix" it. That includes the counts: the script
-  already excludes findings in this tool's own installed files (under
-  `.claude/skills/` and `.claude/plugins/`) and reports how many via
-  `signals.excluded_tool_own_files` — relay that number, don't re-derive it or
-  adjust the totals yourself. Findings elsewhere under `.claude/` are the
-  developer's own code and are included, as they should be.
+  already excludes findings in this tool's own installed files (Claude Code's
+  `.claude/skills/` and `.claude/plugins/`, the other hosts' plugin install
+  directories, and this tool's own skills in any other host's `skills/`) and
+  reports how many via `signals.excluded_tool_own_files` — relay that number, don't
+  re-derive it or adjust the totals yourself. Findings elsewhere under those
+  dot-directories (a team's own skills, `.claude/hooks/`) are the developer's own
+  code and are included, as they should be.
 - If the user compares this report to an earlier one: counts can change between
   runs — the platform recomputes fixability and scores continuously. That's
   normal, not a scan error; say so rather than reconciling by hand.

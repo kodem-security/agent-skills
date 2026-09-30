@@ -33,11 +33,15 @@ git diff --name-only HEAD 2>/dev/null; git diff --cached --name-only 2>/dev/null
 
 Apply these rules in order. First match wins.
 
-**Ignore this skill's own files first:** anything under `.claude/skills/` or
-`.claude/plugins/` (a repo-level install puts these skills' scripts there, and they
-contain the very `exec`/shell patterns listed below — they are not your code and
-never trigger a scan). Everything else under `.claude/` — `hooks/`, `commands/`,
-`agents/`, settings — **is** the developer's own code and is triaged normally.
+**Ignore this tool's own files first:** Claude Code's `.claude/skills/` and
+`.claude/plugins/`, the other hosts' plugin install directories (`.cursor/plugins/`,
+`.gemini/extensions/`, `.codex/plugins/`), and this tool's own skills
+(`kodem-security`, `kodem-backlog-fix`, `kodem-report`) in any other host's
+`skills/` directory. A repo-level install puts these skills' scripts there, and
+they contain the very `exec`/shell patterns listed below — they are not your code
+and never trigger a scan. Everything else under those dot-directories — a team's
+own skills, `hooks/`, `commands/`, `agents/`, `rules/`, `workflows/`, settings —
+**is** the developer's own code and is triaged normally.
 
 **Skip if changes are entirely:** docs, comments, version bumps (no dep changes), plan files, formatting, renames, test-only with no SQL/HTTP/exec/auth patterns, or no file changes at all. The "version field" exception applies **only to the project's own version string** (e.g. a `VERSION` file, or the `version` field of your own package manifest). **A change to any dependency's pinned version always scans** — e.g. `flask==1.0` → `flask==0.12.2` is "only a version change" but pulls in different CVEs.
 

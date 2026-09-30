@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "bash \"$COPILOT_PLUGIN_ROOT/hooks/capture-baseline.sh\" --platform copilot",
+        "timeoutSec": 120
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "bash \"$COPILOT_PLUGIN_ROOT/hooks/end-of-turn-review.sh\" --platform copilot",
+        "timeoutSec": 600
+      }
+    ]
+  }
+}

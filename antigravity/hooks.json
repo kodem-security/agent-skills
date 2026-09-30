@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "bash hooks/capture-baseline.sh --platform antigravity",
+        "timeout": 120
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash hooks/end-of-turn-review.sh --platform antigravity",
+        "timeout": 600
+      }
+    ]
+  }
+}
