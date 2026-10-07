@@ -1,7 +1,7 @@
 {
   "name": "kodem-security",
-  "version": "1.0.1",
-  "description": "Kodem security for AI coding agents: policy scans before commit, runtime-ranked backlog fixing, and posture reports, inside GitHub Copilot.",
+  "version": "1.0.2",
+  "description": "Kodem Security for AI coding agents: policy scans before commit, runtime-ranked backlog fixing, and posture reports, inside GitHub Copilot.",
   "author": {
     "name": "Kodem Security",
     "email": "support@kodemsecurity.com",

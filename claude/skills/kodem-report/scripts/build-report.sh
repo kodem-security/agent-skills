@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a Kodem security report: checks dependencies, then runs build_report.py (see --help).
+# Builds a Kodem Security report: checks dependencies, then runs build_report.py (see --help).
 # Exit: 0 ok · 1 other · 2 kodem-cli missing · 3 not authenticated · 4 repo not mapped
 #       5 not authorized · 6 CLI too old · 7 python3 missing
 set -euo pipefail

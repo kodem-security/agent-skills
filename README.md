@@ -1,9 +1,28 @@
 # Kodem Agent Skills
 
-Give your AI coding agent Kodem: policy scans before commit, runtime-ranked
-fixing of your existing backlog, and read-only security posture reports.
+Give your AI coding agent Kodem: every agent turn is checked against your Kodem
+policies before the code is committed, your existing backlog is fixed in order
+of real runtime risk, and your security posture is a question away.
 
-One repository, one directory per agent platform.
+| Skill | What it does |
+| --- | --- |
+| `kodem-security` | Prevention. At the end of each agent turn, scans only what that turn changed against your CI and SCM policies, and hands policy violations back to the agent to fix. |
+| `kodem-backlog-fix` | Fixes the open issues already in Kodem, ranked by Kodem Score, after you approve the plan. |
+| `kodem-report` | Read-only posture summary or full report. Changes nothing. |
+
+Ask in plain language ("fix my issues", "what's my posture?"), or run a skill
+directly:
+
+- Claude Code, Cursor and Gemini CLI: `/kodem-security scan`, `/kodem-security fix`
+  or `/kodem-security report`; `/kodem-security` alone means `scan`.
+- GitHub Copilot and Antigravity CLI: `/kodem-security` (scan), `/kodem-backlog-fix`
+  or `/kodem-report`.
+- Codex: type `@` and pick Kodem Security or one of its skills.
+
+**Requirements:** a Kodem account, and `git`, `jq` and `python3` on the PATH.
+`kodem-cli` is installed on first use, after you approve it.
+[SECURITY.md](SECURITY.md) covers what runs, what it sends to Kodem, and what
+changes on your machine.
 
 ## Platforms
 
@@ -46,6 +65,13 @@ agy plugin install ./agent-skills/antigravity
 Each directory is a complete, self-contained install for its platform, with
 the same skills and hooks.
 
+## Windows
+
+The hooks and scripts are bash. On Windows, install Git for Windows so Git Bash
+is available; the skills fall back to it from PowerShell through
+`use-bash-windows.ps1`.
+
 ## Help
 
-`support@kodemsecurity.com`, or our shared Slack or Teams channel.
+`support@kodemsecurity.com`, or our shared Slack or Teams channel. Not a Kodem
+customer yet? Visit [kodemsecurity.com](https://www.kodemsecurity.com).

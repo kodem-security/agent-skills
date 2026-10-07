@@ -34,18 +34,17 @@ separate "turn on hooks" step.
 
 ## 2. Sign in
 
-The first time you use a skill it installs `kodem-cli` if it is missing, then
+The first time you use a skill it offers to install `kodem-cli` if it is missing, then
 asks you to sign in:
 
 ```bash
 kodem-cli auth login
 ```
 
-That opens a browser, so it is the one step the plugin cannot do for you.
+That opens a browser, so it is the one step the extension cannot do for you.
 
 In CI or any other non-interactive environment, do not run `auth login`. Set
-an API key as an environment variable instead — see each skill's `SKILL.md`
-for the "running headless" details.
+an API key as an environment variable instead.
 
 ## 3. Restart
 
@@ -58,6 +57,8 @@ new session before trying anything.
 - "fix my issues" gives the backlog, as a plan that waits for your yes.
 - Prevention runs on its own, via the bundled hooks, and speaks up only when a
   change breaks a policy.
+- `/kodem-security fix`, `/kodem-security report` or `/kodem-security scan`
+  runs a skill directly; `/kodem-security` alone means `scan`.
 
 ## How prevention works here
 
@@ -69,22 +70,8 @@ you about first, and it never silences a finding. It re-scans after a fix, at
 most twice, and stops if the same findings come back.
 
 In Gemini CLI a policy block rejects the agent's final answer and sends the
-findings back as a new prompt, labelled as coming from the Kodem hook rather
+findings back as a new prompt, labeled as coming from the Kodem hook rather
 than from you.
-
-## Where you run scans matters
-
-On macOS, if the path you point a scan at reaches the directory through a
-symlink, the scan reads the resolved parent directory rather than the
-directory you named. `/tmp` is a symlink to `/private/tmp` and `/var` is a
-symlink to `/private/var`, so a scan run from anywhere under `/tmp` or `/var`
-will read everything under `/private/tmp` or `/private/var`, and will report
-what it finds there as yours. For Backlog-fix and Report that also reaches the
-inventory they send to the platform. Prevention sends no scan data either way.
-
-**Run scans from a real path rather than through `/tmp` or `/var`.** A
-repository checked out under your home directory or a CI workspace path is not
-affected.
 
 ## Uninstall
 
@@ -95,5 +82,5 @@ gemini extensions uninstall kodem-security
 ## Help
 
 `support@kodemsecurity.com`, or our shared Slack or Teams channel. When
-reporting a problem, quote the plugin version from
+reporting a problem, quote the extension version from
 [`gemini-extension.json`](gemini-extension.json).

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Kodem security scan (open-source + code), scoped to new findings against a baseline.
+# Kodem Security scan (open-source + code), scoped to new findings against a baseline.
 # Usage: scan.sh <repo-root> [--open-source-only | --code-only] [--description <TAG>] [--no-trace]
+#        [--accept-scanner-download]   (only after the developer agrees to the opengrep download)
 #   staged: [--sast-dir D | --sast-worktree D] [--sca-dir D [--sca-baseline-dir D]]
 #           [--repo-name N] [--branch-name N]
 #
 # Exit: 0 clean/warn · 2 bad args · 5 blocked · 10 scan-error · 11 cli-missing (don't block)
-#       12 auth-required
-# Trailers: KODEM_RESULT: clean|warn|blocked|auth-required|scan-error|cli-missing
+#       12 auth-required · 13 scanner-missing (kodem-cli's code scanner isn't downloaded yet)
+# Trailers: KODEM_RESULT: clean|warn|blocked|auth-required|scan-error|cli-missing|scanner-missing
 #           KODEM_FINDINGS: <n>   KODEM_UPDATE_AVAILABLE: <version> (optional)
 
 export PATH="$PATH:$HOME/.local/bin:/usr/local/bin:$HOME/bin:/opt/homebrew/bin"
@@ -20,6 +21,7 @@ SCRIPT_DIR="$(dirname "$0")"
 MODE="both"
 DESCRIPTION=""
 NO_TRACE=false
+ACCEPT_SCANNER=false
 
 STAGED=false
 SAST_DIR=""
@@ -33,6 +35,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --open-source-only|--code-only)
       MODE="$1"
+      shift
+      ;;
+    --accept-scanner-download)
+      ACCEPT_SCANNER=true
       shift
       ;;
     --no-trace)
@@ -79,17 +85,8 @@ fi
 emit_result() { echo "KODEM_RESULT: $1"; }
 emit_update_available() { echo "KODEM_UPDATE_AVAILABLE: $1"; }
 
-ensure_cli() {
-  if command -v kodem-cli &>/dev/null; then return 0; fi
-  echo "kodem-cli not found on PATH; installing..."
-  if ! "$SCRIPT_DIR/install.sh"; then
-    echo "ERROR: kodem-cli installation failed"
-    return 1
-  fi
-  command -v kodem-cli &>/dev/null
-}
-
-if ! ensure_cli; then
+if ! command -v kodem-cli &>/dev/null; then
+  echo "kodem-cli is not installed. Install it with: $SCRIPT_DIR/install.sh"
   emit_result "cli-missing"
   exit 11
 fi
@@ -98,17 +95,34 @@ is_flag_error() {
   echo "$1" | grep -qE "Flag error:|unknown flag"
 }
 
-refresh_cli() {
-  echo "Detected obsolete kodem-cli (unknown flag); downloading a new version..."
-  "$SCRIPT_DIR/install.sh" || return 1
-}
-
 AUTH_FAILED=false
+SCANNER_MISSING=false
+# kodem-cli asks before downloading opengrep for code scans; answer yes only when told to.
+SCANNER_INPUT=/dev/null
+if [ "$ACCEPT_SCANNER" = true ]; then
+  SCANNER_INPUT="$(mktemp)"; printf 'y\n' > "$SCANNER_INPUT"
+  trap 'rm -f "$SCANNER_INPUT"' EXIT
+fi
 is_auth_error() {
   echo "$1" | grep -qE "Failed to authenticate|No credentials provided|expired or been revoked"
 }
 
 REPO_ROOT=$(cd "$REPO_ROOT" && git rev-parse --show-toplevel 2>/dev/null || echo "$REPO_ROOT")
+
+# A clean full scan here lets the end-of-turn hook skip the same working tree.
+worktree_id() {
+  local idx; idx="$(mktemp)" || return 0
+  GIT_INDEX_FILE="$idx" git -C "$1" read-tree HEAD 2>/dev/null \
+    && GIT_INDEX_FILE="$idx" git -C "$1" add -A 2>/dev/null \
+    && GIT_INDEX_FILE="$idx" git -C "$1" write-tree 2>/dev/null
+  rm -f "$idx"
+}
+record_clean_scan() {
+  [ "$STAGED" = false ] && $RUN_OPEN_SOURCE && $RUN_CODE || return 0
+  local id; id="$(worktree_id "$REPO_ROOT")"
+  [ -z "$id" ] || printf '%s %s' "$id" "$(command -v kodem-cli)" \
+    > "/tmp/.kodem-skill-scan-$(cd "$REPO_ROOT" && pwd -P | shasum | cut -c1-16)" 2>/dev/null || true
+}
 REPO_NAME=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null \
   | sed 's|\.git$||' | sed -E 's|.*/||') \
   || REPO_NAME=$(basename "$REPO_ROOT")
@@ -191,7 +205,9 @@ extract_total_issues() {
 run_scan() {
   local out_var="$1" exit_var="$2"; shift 2
   local out exit_code=0
-  out=$("$@" 2>&1) || exit_code=$?
+  out=$("$@" < "$SCANNER_INPUT" 2>&1) || exit_code=$?
+
+  case "$exit_code:$out" in 0:*) ;; *"binary download declined"*) SCANNER_MISSING=true ;; esac
 
   if [ $exit_code -ne 0 ] && is_auth_error "$out"; then
     # Staged mode is the unrequested end-of-turn hook: a browser OAuth window would stall the turn.
@@ -201,7 +217,7 @@ run_scan() {
       echo "Authentication required, launching browser OAuth..."
       if kodem-cli auth login; then
         exit_code=0
-        out=$("$@" 2>&1) || exit_code=$?
+        out=$("$@" < "$SCANNER_INPUT" 2>&1) || exit_code=$?
         if [ $exit_code -ne 0 ] && is_auth_error "$out"; then AUTH_FAILED=true; fi
       else
         echo "ERROR: kodem-cli authentication failed"
@@ -210,15 +226,10 @@ run_scan() {
     fi
   fi
 
-  # kodem-cli exits 0 on "unknown flag": refresh once, then force scan-error, never clean.
+  # kodem-cli exits 0 on "unknown flag": report scan-error, never clean.
   if is_flag_error "$out"; then
-    if refresh_cli; then
-      exit_code=0
-      out=$("$@" 2>&1) || exit_code=$?
-    fi
-    if is_flag_error "$out"; then
-      exit_code=10
-    fi
+    echo "kodem-cli is too old for this scan. Update it with: $SCRIPT_DIR/install.sh"
+    exit_code=10
   fi
 
   printf -v "$out_var" '%s' "$out"
@@ -263,7 +274,6 @@ if $RUN_CODE; then
     export GIT_INDEX_FILE="${KODEM_SCAN_INDEX}"
   fi
   run_scan SAST_OUTPUT SAST_EXIT \
-    bash -c 'echo y | "$@"' _ \
     kodem-cli scan code-repository code "$SAST_TARGET" \
       --code-repository-name "$REPO_NAME" --branch-name "$BRANCH_NAME" \
       --skill-trigger \
@@ -324,6 +334,13 @@ if [ "$AUTH_FAILED" = true ]; then
   exit 12
 fi
 
+if [ "$SCANNER_MISSING" = true ]; then
+  echo "kodem-cli needs to download its code scanner (opengrep) before it can scan code."
+  echo "Ask the developer; if they agree, re-run this scan with --accept-scanner-download."
+  emit_result "scanner-missing"
+  exit 13
+fi
+
 if is_scan_error "$SCA_EXIT" || is_scan_error "$SAST_EXIT"; then
   echo "ERROR: Scan errored (open-source=$SCA_EXIT, code=$SAST_EXIT) — results unreliable"
   emit_result "scan-error"
@@ -333,6 +350,7 @@ fi
 if [ "$SCA_EXIT" -eq 6 ] || [ "$SAST_EXIT" -eq 6 ] || [ "$POLICY_NOT_FOUND" = true ]; then
   echo "POLICY: NOT FOUND — no applicable policy, falling back to severity-based evaluation"
   emit_result "warn"
+  record_clean_scan
   exit 0
 fi
 
@@ -343,4 +361,5 @@ else
   echo "POLICY: PASSED — non-blocking findings present (open-source=$SCA_ISSUES, code=$SAST_ISSUES)"
   emit_result "warn"
 fi
+record_clean_scan
 exit 0

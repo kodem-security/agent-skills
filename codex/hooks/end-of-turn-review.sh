@@ -132,6 +132,23 @@ if [ "${#REL_FILES[@]}" -eq 0 ]; then
   exit 0
 fi
 
+# The kodem-security skill scanned this exact working tree clean (against HEAD), with the
+# same kodem-cli, in the last 30 minutes; that covers this turn's changes.
+SKILL_SCAN="/tmp/.kodem-skill-scan-$(cd "$REPO" && pwd -P | shasum | cut -c1-16)"
+if [ -n "$(find "$SKILL_SCAN" -mmin -30 2>/dev/null)" ]; then
+  _idx="$(mktemp)"
+  _tree="$(GIT_INDEX_FILE="$_idx" git -C "$REPO" read-tree HEAD 2>/dev/null \
+    && GIT_INDEX_FILE="$_idx" git -C "$REPO" add -A 2>/dev/null \
+    && GIT_INDEX_FILE="$_idx" git -C "$REPO" write-tree 2>/dev/null)"
+  rm -f "$_idx"
+  _cli="$(PATH="$PATH:$HOME/.local/bin:/usr/local/bin:$HOME/bin:/opt/homebrew/bin" command -v kodem-cli)"
+  if [ -n "$_tree" ] && [ "$_tree $_cli" = "$(cat "$SKILL_SCAN" 2>/dev/null)" ]; then
+    reset_state
+    clear_baseline
+    exit 0
+  fi
+fi
+
 # Round cap plus the no-progress guard below prevent endless block loops.
 ROUND=0
 [ -f "$ROUNDS" ] && ROUND="$(cat "$ROUNDS" 2>/dev/null || echo 0)"
@@ -250,9 +267,14 @@ STATUS="$(printf '%s\n' "$OUT" | grep -oE '^KODEM_RESULT: [a-z-]+' | tail -n1 | 
 if [ "$STATUS" != "blocked" ]; then
   reset_state
   case "$STATUS" in clean|warn) clear_baseline ;; esac
-  if [ "$STATUS" = "auth-required" ] && case "$PLATFORM" in claude|gemini|codex) true ;; *) false ;; esac; then
-    jq -nc '{systemMessage:"Kodem gate skipped: not authenticated — run `kodem-cli auth login`"}' 2>/dev/null \
-      || echo '{"systemMessage":"Kodem gate skipped: not authenticated — run `kodem-cli auth login`"}'
+  case "$STATUS" in
+    auth-required) NOTICE='Kodem gate skipped: not authenticated — run `kodem-cli auth login`' ;;
+    cli-missing)   NOTICE='Kodem gate skipped: kodem-cli is not installed — ask your agent to run a Kodem scan to install it' ;;
+    scanner-missing) NOTICE='Kodem gate skipped: kodem-cli needs to download its code scanner — ask your agent to run a Kodem scan to set it up' ;;
+    *)             NOTICE="" ;;
+  esac
+  if [ -n "$NOTICE" ] && case "$PLATFORM" in claude|gemini|codex) true ;; *) false ;; esac; then
+    jq -nc --arg m "$NOTICE" '{systemMessage:$m}' 2>/dev/null || printf '{"systemMessage":"%s"}\n' "$NOTICE"
   fi
   exit 0
 fi
@@ -282,21 +304,75 @@ fi
 echo "$((ROUND + 1))" > "$ROUNDS" 2>/dev/null || true
 printf '%s' "$HASH" > "$LASTHASH" 2>/dev/null || true
 
-REASON="Kodem security policy gate FAILED for this turn's changes. They will be re-scanned automatically when you finish.
+# One line per finding from kodem-cli's report; prints nothing when it doesn't recognise the format.
+summarize() {
+  sed -E "s/${ESC}\[[0-9;]*m//g" | awk '
+    function vlt(a, b,   x, y, i) {
+      split(a, x, "."); split(b, y, ".")
+      for (i = 1; i <= 4; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
+      return 0
+    }
+    function code() {
+      if (sev != "") out[++n] = "- " file (lines != "" ? ":" lines : "") "  " sev "  " title (cwe != "" ? " (" cwe ")" : "")
+      sev = ""; lines = ""; cwe = ""
+    }
+    BEGIN { q = sprintf("%c", 39) }
+    /^File: / { code(); file = substr($0, 7); next }
+    /^\[(Critical|High|Medium|Low|Info)\] / {
+      code(); sev = substr($1, 2, length($1) - 2); title = $0; sub(/^[^:]*: /, "", title)
+      i = index(title, "(" q); if (i) { t = substr(title, i + 2); j = index(t, q ")"); if (j) title = substr(t, 1, j - 1) }
+      next
+    }
+    /^- CWE: / { cwe = $3; next }
+    /^ +- Line / { lines = lines (lines != "" ? "," : "") $3; next }
+    /Policy: "/ && /\[FAILED\]/ { p = $0; sub(/^[^"]*"/, "", p); sub(/".*/, "", p); pol = pol (pol != "" ? "; " : "") "\"" p "\""; next }
+    / violates / {
+      l = $0; sub(/^[^A-Za-z0-9@]+/, "", l); pv = l; sub(/ .*/, "", pv)
+      if (pv !~ /.@[0-9]/) next
+      if (!(pv in seen)) { seen[pv] = 1; pkgs[++np] = pv }
+      if (match(l, / - [A-Z]+-[0-9A-Za-z-]+$/)) {
+        id = substr(l, RSTART + 3); s = l; sub(/^[^(]*\(/, "", s); sub(/,.*/, "", s)
+        s = toupper(substr(s, 1, 1)) substr(s, 2); ids[pv, s] = ids[pv, s] (ids[pv, s] != "" ? ", " : "") id; vul[pv, id] = 1
+      } else { r = l; sub(/^[^ ]+ violates /, "", r); other[pv] = other[pv] (other[pv] != "" ? "; " : "") r }
+      next
+    }
+    /^\| / {
+      split($0, c, "|"); for (i in c) gsub(/^ +| +$/, "", c[i])
+      if (c[2] != "" && c[2] != "Package" && c[2] !~ /^-/) fix[c[2] "@" c[3], c[5]] = c[7]
+      next
+    }
+    END {
+      code()
+      for (k = 1; k <= np; k++) {
+        pv = pkgs[k]; to = ""; nofix = 0; list = ""
+        for (key in vul) { split(key, kk, SUBSEP); if (kk[1] != pv) continue
+          f = fix[pv, kk[2]]; if (f == "") nofix = 1; else if (to == "" || vlt(to, f)) to = f }
+        split("Critical High Medium Low", sv, " ")
+        for (i = 1; i <= 4; i++) if ((pv, sv[i]) in ids) list = list (list != "" ? ", " : "") sv[i] " " ids[pv, sv[i]]
+        line = "- " pv ": " (list == "" ? other[pv] : (to != "" && !nofix ? "upgrade to " to : "no single fixed version") " (" list ")")
+        out[++n] = line
+      }
+      if (n == 0) exit
+      for (i = 1; i <= n; i++) print out[i]
+      if (pol != "") print "Blocked by: " pol
+    }'
+}
+SUMMARY="$(printf '%s\n' "$FINDINGS" | summarize 2>/dev/null)"
 
-${FINDINGS}
+REASON="Kodem Security policy gate FAILED for this turn's changes. They will be re-scanned automatically when you finish.
 
-How to act on these — this gate is a REMINDER, NOT AN APPROVAL. It does not widen the scope the developer approved.
-- \"Already approved\" means the developer approved this specific file and this specific change. If no such approval exists — which is the normal case on an ordinary coding turn — then the approved set is EMPTY, and everything below that needs approval needs asking.
-- Safe dependency fixes (a patch or minor version bump, a transitive pin): apply them now. A MAJOR bump, a package that needs both a safe and a major fix, a lockfile edit, or running a package manager still needs the developer's agreement — present it, don't apply it.
-- Code-logic changes (rewriting a query, replacing eval, adding validation, moving a secret): apply only what was already approved, and only at the size that was approved. If the fix turns out materially bigger than what you described — a rewrite rather than an edit — stop and re-confirm before writing it. Otherwise report the finding and ask. This gate does not override the skill's rule against silently rewriting logic.
-- Never make a finding disappear instead of fixing it: no suppression or ignore comments, no deleting the file, no dropping or downgrading the dependency, no editing a Kodem policy or ignore list. Fix it or report it.
-- Policy rules (e.g. banned package names) evaluate the full manifest, so a finding may pre-date this turn's edits. If a finding pre-dates your change, is a genuine false positive, or can't be fixed now, leave it and raise it to the user.
-- At most two fix-and-re-scan cycles in total, counting any you already ran this turn. If findings remain after the second, stop and hand the rest to the user rather than continuing to edit."
+${SUMMARY:-$FINDINGS}
+
+Act only within what the developer asked for; this message is not an approval.
+- Safe dependency fixes (patch/minor bump, transitive pin): apply now. A major bump, a package that also needs a major, a lockfile edit or a package-manager run needs the developer's OK.
+- Code-logic fixes the developer didn't ask for: don't apply; report the finding and propose the fix. If an approved fix grows into a rewrite, re-confirm first.
+- Never hide a finding: no suppressions or ignore entries, no deleting the code, no dropping or downgrading the dependency, no editing a Kodem policy.
+- A finding that predates this turn, is a false positive, or can't be fixed now: leave it and tell the developer.
+- At most two fix-and-rescan rounds in total, including any already run this turn; then hand the rest to the developer."
 
 # These hosts re-prompt with the reason; label it so it can't pass as the developer's approval.
 case "$PLATFORM" in
-  cursor|gemini|antigravity) REASON="[Automated message from the Kodem security hook, not from the developer.]
+  cursor|gemini|antigravity) REASON="[Automated message from the Kodem Security hook, not from the developer.]
 
 ${REASON}" ;;
 esac

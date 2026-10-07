@@ -32,6 +32,28 @@ canonical_path() {
   echo "$dir/$(basename "$p")"
 }
 
+# The file must match the MD5 the storage bucket reports for it (x-goog-hash).
+verify_download() {
+  local file="$1" headers="$2" expected actual
+  expected=$(tr -d '\r' < "$headers" | sed -n 's/^[Xx]-[Gg]oog-[Hh]ash: *md5=//p' | tail -n1)
+  if [ -z "$expected" ]; then
+    echo "WARNING: the download server sent no checksum; kodem-cli was not verified" >&2
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    actual=$(openssl dgst -md5 -binary "$file" | openssl base64)
+  elif command -v python3 >/dev/null 2>&1; then
+    actual=$(python3 -c 'import base64,hashlib,sys;print(base64.b64encode(hashlib.md5(open(sys.argv[1],"rb").read()).digest()).decode())' "$file")
+  else
+    echo "WARNING: no openssl or python3 to verify the download; kodem-cli was not verified" >&2
+    return 0
+  fi
+  if [ "$actual" != "$expected" ]; then
+    echo "ERROR: kodem-cli download failed its checksum (expected md5 $expected, got $actual); not installed" >&2
+    return 1
+  fi
+}
+
 HINT_DIR=""
 resolve_targets() {
   local binary_name="$1"
@@ -134,7 +156,7 @@ main() {
   fi
 
   # Only ever delete our own temp files.
-  trap '[ -z "${TMP_DL:-}" ] || rm -f "$TMP_DL"; [ -z "${STAGED:-}" ] || rm -f "$STAGED"' EXIT
+  trap '[ -z "${TMP_DL:-}" ] || rm -f "$TMP_DL" "$TMP_DL.headers"; [ -z "${STAGED:-}" ] || rm -f "$STAGED"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
@@ -142,9 +164,13 @@ main() {
   tmp=$(mktemp)
   TMP_DL="$tmp"
   echo "Downloading $remote_name ($VERSION_SEG)..."
-  if ! curl -fsSL --retry 3 "$PUBLIC_BASE/$VERSION_SEG/$remote_name" -o "$tmp"; then
-    rm -f "$tmp"
+  if ! curl -fsSL --retry 3 -D "$tmp.headers" "$PUBLIC_BASE/$VERSION_SEG/$remote_name" -o "$tmp"; then
+    rm -f "$tmp" "$tmp.headers"
     echo "ERROR: failed to download kodem-cli ($VERSION_SEG) for $platform" >&2
+    return 1
+  fi
+  if ! verify_download "$tmp" "$tmp.headers"; then
+    rm -f "$tmp" "$tmp.headers"
     return 1
   fi
   chmod +x "$tmp"

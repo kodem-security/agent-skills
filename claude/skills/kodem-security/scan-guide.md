@@ -18,9 +18,18 @@ ${CLAUDE_SKILL_DIR}/scripts/use-bash-windows.ps1 scan.sh <repo-root>
 **CRITICAL**: Always use the full path directly — do NOT assign to a variable,
 as that breaks the tool-approval allowlist.
 
-The script outputs open-source and code results sequentially. If kodem-cli
-is not found, it prints an error with install instructions — relay that to
-the user and stop.
+The script outputs open-source and code results sequentially. It never
+installs or updates kodem-cli itself:
+
+- **`KODEM_RESULT: cli-missing`** — kodem-cli is not installed. Ask the user
+  whether to install it. If yes, run the installer (below), then re-run the
+  scan once. If no, stop.
+- **"kodem-cli is too old for this scan"** — ask the user whether to update it.
+  If yes, run the installer, then re-run the scan once.
+- **`KODEM_RESULT: scanner-missing`** — kodem-cli needs to download its code
+  scanner (opengrep, from `public.kodemsecurity.com`) before the first code scan.
+  Ask the user whether to download it. If yes, re-run the same scan once with
+  `--accept-scanner-download`. If no, report the open-source results only.
 
 If both scans fail with auth errors, tell the user to run `kodem-cli auth
 login` to complete the browser OAuth flow.
@@ -42,7 +51,8 @@ hold them back — the current results are still valid), ask the user whether th
 want to update to `<version>`.
 
 - If **yes**: run the installer, then re-run the scan **once** with the same
-  arguments and use the fresh results.
+  arguments and use the fresh results. This is the same installer used above
+  for a missing or outdated kodem-cli.
 
   ```bash
   ${CLAUDE_SKILL_DIR}/scripts/install.sh
@@ -64,10 +74,8 @@ file to remove. Surface that path to the user, then continue with the
 current results.
 
 If kodem-cli exits with code **137** (`SIGKILL`, often "Code Signature
-Invalid") right after an update on macOS, an older installer overwrote the
-binary in place while a copy was still running, and macOS rejects its cached
-signature. Tell the user to close any running kodem-cli and run the installer
-again — it now writes a fresh file, so the rerun fixes it. The installer's
+Invalid") right after an update on macOS, tell the user to close any running
+kodem-cli and run the installer again. The installer's
 `kodem-cli ... was killed on launch (exit 137)` warning points to the same fix.
 
 ## Reading results
@@ -92,7 +100,7 @@ Each policy line in the output is prefixed with its origin and category, e.g.
   listed under the policy on its own line
 - `[WARN AND PASS]` — violations found but policy action is warn-only
 - `[PARTIAL]` — some conditions couldn't be evaluated locally (e.g. runtime
-  reachability, KAI confirmation); the evaluated conditions still pass, but
+  reachability, Kai confirmation); the evaluated conditions still pass, but
   mention the gap so the developer knows the server may decide otherwise
 - `NOT FOUND` — no policy configured for this repo in either CI or SCM
 
@@ -100,10 +108,12 @@ The script's wrapper exit codes are:
 - `0` — clean OR non-blocking findings (status in trailer line)
 - `5` — policy-blocked findings; caller should block the action
 - `10` — scan errored (CLI ran but did not produce usable results)
-- `11` — CLI missing and install failed; caller should not block
+- `11` — kodem-cli is not installed; caller should not block
+- `12` — not authenticated; caller should not block
+- `13` — kodem-cli's code scanner isn't downloaded yet; caller should not block
 
 A trailer line `KODEM_RESULT: <status>` is always emitted — values: `clean`,
-`warn`, `blocked`, `scan-error`, `cli-missing`.
+`warn`, `blocked`, `scan-error`, `cli-missing`, `auth-required`, `scanner-missing`.
 
 **When policy status is `NOT FOUND`**, report all findings by severity but
 do not block the developer — there is no policy to enforce.

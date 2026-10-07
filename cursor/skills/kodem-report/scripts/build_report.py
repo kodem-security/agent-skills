@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a Kodem security report from platform data.
+"""Build a Kodem Security report from platform data.
 
 Pulls a repo's triage data via kodem-cli (issues, Quick Wins, policy verdicts),
 digests it into a canonical report.json, and renders a human-readable report.
@@ -50,7 +50,7 @@ UNRESOLVABLE_MANIFESTS = {
 
 RUNTIME_EVALUATED = ("HAS_EVIDENCE", "NO_INDICATION")
 
-SYNTHESISED_SERVER_SIDE = ("package.json",)
+SYNTHESIZED_SERVER_SIDE = ("package.json",)
 
 
 class Parser(argparse.ArgumentParser):
@@ -78,7 +78,8 @@ def run_cli(args, timeout=180, timeout_fatal=True):
     if shutil.which(CLI) is None:
         fail(EXIT_CLI_MISSING, f"{CLI} not found on PATH — install it first (see the skill's Step 0).")
     try:
-        proc = subprocess.run([CLI] + args, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run([CLI] + args, capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         if timeout_fatal:
             fail(1, f"kodem-cli {' '.join(args[:2])} timed out after {timeout}s")
@@ -157,6 +158,9 @@ def pull_quick_wins(project_ids):
     return wins, {"failed": failed, "total": len(project_ids)}
 
 
+SCANNER_MISSING = []
+
+
 def pull_policy(repo_root, repo_name):
     """Run both variants (distinct rule sets); a non-zero rc can mean 'blocked', not an error."""
     results = []
@@ -166,7 +170,10 @@ def pull_policy(repo_root, repo_name):
                                 "--policy-type", "all", "--skill-trigger",
                                 "--description", "report: read-only posture check"],
                                timeout=900, timeout_fatal=False)
-        results.append((variant, rc, (out or "") + ("\n" + err if err else "")))
+        text = (out or "") + ("\n" + err if err else "")
+        if "binary download declined" in text:
+            SCANNER_MISSING.append(variant)
+        results.append((variant, rc, text))
     return results
 
 
@@ -432,7 +439,7 @@ def digest(data, policy, quick_wins, qw_unavailable, repo_name, scope_desc,
         "manifests_without_lockfile": list(unresolved_manifests),
         "base_image_findings": sum(1 for f in findings if f["from_base_image"] is True),
         "base_image_fix_known": sum(1 for f in findings if f["base_image_fix"]),
-        "uncategorised": sum(1 for f in findings
+        "uncategorized": sum(1 for f in findings
                              if f["category"] not in ("sca", "sast")),
         "excluded_tool_own_files": len(excluded),
     }
@@ -515,6 +522,9 @@ def policy_section(rep):
 def signal_notes(rep):
     s = rep["signals"]
     notes = []
+    if SCANNER_MISSING:
+        notes.append("The code policy check needs kodem-cli's code scanner (opengrep), which isn't "
+                     "downloaded yet. Run a Kodem scan and approve the download to set it up.")
     returned = rep["total"] + (s.get("excluded_tool_own_files") or 0)
     if rep["platform_total"] > returned and not rep["scope"]:
         notes.append(f"The platform reported {rep['platform_total']} matching issues but "
@@ -528,10 +538,10 @@ def signal_notes(rep):
             f"is therefore {dropped} higher than this report's. Findings elsewhere "
             "under those dot-directories (your own skills, hooks, commands, agents, "
             "settings) are your own code and ARE included.")
-    uncategorised = s.get("uncategorised") or 0
-    if uncategorised:
+    uncategorized = s.get("uncategorized") or 0
+    if uncategorized:
         notes.append(
-            f"{uncategorised} of {rep['total']} issues carry no recognised type "
+            f"{uncategorized} of {rep['total']} issues carry no recognized type "
             "(neither SCA nor code), so they are counted in the total but appear in "
             "neither column of the severity table. The table under-counts by that "
             "many — read the findings list, not the table.")
@@ -549,7 +559,7 @@ def signal_notes(rep):
                 "and commit the lockfile (e.g. `npm install --package-lock-only`, "
                 "`poetry lock`, `uv lock`, `cargo generate-lockfile`, "
                 "`composer update --lock`, `bundle lock`), then re-run.")
-        if any(posixpath.basename(p) in SYNTHESISED_SERVER_SIDE for p in unresolved):
+        if any(posixpath.basename(p) in SYNTHESIZED_SERVER_SIDE for p in unresolved):
             note += (" For npm the platform tries to synthesise a lockfile before "
                      "scanning, so findings may still be present — but that needs "
                      "registry access and is skipped for npm workspaces, so it is "
@@ -597,7 +607,7 @@ def footer(rep):
 
 
 def render_full(rep, elide_findings=False):
-    out = [f"# Kodem security report — {rep['repo']}"]
+    out = [f"# Kodem Security report — {rep['repo']}"]
     if rep["scope"]:
         out.append(f"_Scoped: {rep['scope']} — issues outside this scope are not shown._")
     out += ["", "## 1. Overview",

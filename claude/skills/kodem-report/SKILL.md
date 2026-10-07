@@ -4,8 +4,7 @@ description: "Read-only security report of a repo's Kodem state — full report 
 allowed-tools:
   - Bash(${CLAUDE_SKILL_DIR}/scripts/build-report.sh:*)
   - Bash(kodem-cli:*)
-  - Bash(git remote:*)
-  - Bash(git config:*)
+  - Bash(git remote get-url:*)
   - Bash(git rev-parse:*)
   - Bash(git status:*)
   - Read
@@ -28,6 +27,16 @@ Two outputs:
 
 Both end the same way: offer to hand straight to `kodem-backlog-fix`.
 
+## How to answer
+
+The script's output is the report; what you add around it stays short.
+
+- Before it: at most three sentences on what matters and the one thing to do first.
+- Each missing signal: one line. The fallback tier: only when it isn't Full.
+- After it: the fix hand-off and the runtime-resolution note, one sentence each.
+- Don't narrate the steps (access checks, which commands you ran). Explanations,
+  per-finding detail and caveats beyond that only when asked.
+
 ## The read-only contract
 
 This skill makes **zero changes** on every run. No file edits, no dependency
@@ -35,7 +44,7 @@ bumps, no commits, no pushes, no code rewrites — even if a fix looks trivial.
 The person running a report is often *deciding whether to trust the tooling*;
 an unexpected write, however helpful, breaks that trust permanently.
 
-- Run only read commands: `git remote`/`config`/`rev-parse`/`status`, `kodem-cli`
+- Run only read commands: `git remote get-url`/`rev-parse`/`status`, `kodem-cli`
   reads, the report script below, and the policy-aware scan (which reads the
   repo and reports — it changes nothing).
 - Report files are written to a **temp directory**, never into the repo. Only
@@ -156,7 +165,7 @@ it, then add the judgment a script can't:
 - If the user compares this report to an earlier one: counts can change between
   runs — the platform recomputes fixability and scores continuously. That's
   normal, not a scan error; say so rather than reconciling by hand.
-- **Call out the base image when it dominates.** On a containerised repo the base
+- **Call out the base image when it dominates.** On a containerized repo the base
   image is often most of the backlog, and that changes the answer to "what should I
   prioritize?" from a list of packages to a single `FROM` bump. The script counts
   this for you — read it from `report.json`, don't re-derive it:
@@ -213,7 +222,7 @@ them under **Missing signals**; your job is to make sure they land:
 
 Never fabricate a value the platform didn't return.
 
-## Fallback tiers — always name the tier you're in
+## Fallback tiers — name the tier when it isn't Full
 
 - **Full**: connected, mapped, correlated, Kai on, policies set → everything above.
 - **No runtime / no correlation**: full report minus runtime — see Missing signals.

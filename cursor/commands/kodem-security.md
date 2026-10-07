@@ -1,22 +1,22 @@
+---
+description: "Kodem Security: `scan` your current changes (default), `fix` your existing backlog, or get a `report`."
+---
 
-The developer wants to work through their **existing** Kodem security backlog —
-the open issues already in the Kodem platform — not the diff they just wrote.
+Route the developer's request by its first word:
 
-Handle their request using the **kodem-backlog-fix** skill: follow its flow
-(identify the repo → pull the prioritized backlog → orient and show the plan →
-confirm → apply Kodem's computed fixes → re-scan and hand back), and its
-Supported-requests table for mapping what they said to the right scope.
+- `scan` (or no subcommand): use the **kodem-security** skill to scan the current
+  changes against the repo's Kodem policies now.
+- `fix`: use the **kodem-backlog-fix** skill on the rest of the request. It works
+  through the **existing** Kodem backlog, not the diff they just wrote: pull the
+  prioritized issues, show the plan, confirm, apply Kodem's fixes, re-scan. With
+  nothing after `fix`, the ask is "fix my issues": the top 10 open issues by Kodem
+  Score — SCA issues that have a fix, and code issues Kai confirmed real. If the
+  request is read-only ("what's my posture?", "show me everything"), use
+  **kodem-report** instead.
+- `report`: use the **kodem-report** skill: full report, or the short posture
+  summary if they asked for posture. It makes no changes.
 
-One exception: if the request is **read-only** — "full report", "show me
-everything", "what's my posture?", "what should I prioritize?", or any ask to
-*see* the state rather than fix it — use the **kodem-report** skill instead. It
-builds the report (or short posture summary) from the same data, makes zero
-changes, and ends by offering to hand back to backlog-fix.
+Their request: $ARGUMENTS
 
-Their request is whatever they typed after the command.
-
-If they typed nothing after it, treat it as the default ask ("fix my issues"): the top
-10 open issues by Kodem Score — SCA (dependency) issues that have a fix, and code
-(SAST) issues confirmed real by Kai, Kodem's AI code-analysis verdict (i.e. not a
-false positive). Always state the inference you made and confirm before applying
-anything, and never commit or push automatically.
+For `fix`, state the inference you made and confirm before applying anything.
+Never commit or push.

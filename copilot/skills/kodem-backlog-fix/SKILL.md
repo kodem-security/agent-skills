@@ -1,6 +1,6 @@
 ---
 name: kodem-backlog-fix
-description: "Fix a repo's EXISTING Kodem security backlog — the open SCA and SAST issues already in the Kodem platform — prioritized by Kodem Score (runtime reachability + exploitability + severity). Use this whenever a developer asks to fix, triage, or work through their security issues/backlog/vulnerabilities: 'fix my issues', 'fix the backlog', 'fix all critical and high', 'fix the runtime-reachable ones', 'just the dependencies', 'fix everything from lodash', 'grab the quick wins', 'fix CVE-2024-3094', a pasted Kodem issue link, or 'fix the issue on <ticket_id>'. This is DIFFERENT from the prevention scan (which only checks the diff you just wrote) — this pulls and fixes issues that already exist in the repo. Requires Kodem platform access (OAuth or API key)."
+description: "Fix a repo's EXISTING Kodem Security backlog — the open SCA and SAST issues already in the Kodem platform — prioritized by Kodem Score (runtime reachability + exploitability + severity). Use this whenever a developer asks to fix, triage, or work through their security issues/backlog/vulnerabilities: 'fix my issues', 'fix the backlog', 'fix all critical and high', 'fix the runtime-reachable ones', 'just the dependencies', 'fix everything from lodash', 'grab the quick wins', 'fix CVE-2024-3094', a pasted Kodem issue link, or 'fix the issue on <ticket_id>'. This is DIFFERENT from the prevention scan (which only checks the diff you just wrote) — this pulls and fixes issues that already exist in the repo. Requires Kodem platform access (OAuth or API key)."
 ---
 
 # Kodem Backlog Fix
@@ -21,6 +21,21 @@ Default behavior for a bare "fix my issues": the **top 10 by Kodem Score**, with
 SCA (open-source) filtered to *fixable* and SAST (code) filtered to *not a false
 positive*. Anything more specific (see **Supported requests**) narrows or widens
 that set.
+
+## How to answer
+
+The developer reads the plan and the result, not your process. Keep every message
+short; these limits take precedence over the wording of the steps below.
+
+- Don't narrate the steps (scope resolution, which commands you ran, why). Speak up
+  only when something failed or needs a decision.
+- **Plan (Step 3):** two or three sentences, then at most 10 item lines. If more
+  issues qualify, say how many and that they can ask for them.
+- **Fallback tier:** mention it only when it isn't Full, in one sentence.
+- **Hand-back (Step 6):** at most six lines: what changed, the test command and its
+  result, policy before → after (if one was breaching), what's left, that the
+  changes are uncommitted, and the runtime-resolution note in one sentence.
+- CVE lists, scores, file paths and explanations beyond that only when asked.
 
 ## Prerequisite: platform access is the floor
 
@@ -214,7 +229,7 @@ Each issue carries the signals you rank and present by:
   `introducedThroughInsights.fromBaseImage: true` is fixed by a Dockerfile `FROM`
   bump, not a package version, so `hasFixVersion` says nothing useful about it and
   is often `false`. Filtering on it would drop what is frequently the largest and
-  highest-leverage part of a containerised repo's backlog before you ever see it.
+  highest-leverage part of a containerized repo's backlog before you ever see it.
 - **SAST**: fixability isn't the filter (SAST always ships fix guidance) — the
   Kai verdict is. Drop `issueKaiAnalysis.isFalsePositive == true`. If
   `issueKaiAnalysis` is absent/null, Kai isn't enabled for this org — keep the
@@ -275,6 +290,12 @@ kodem-cli scan code-repository code <repo-root> \
 
 Merge the verdicts from both before reporting anything. If one variant errors,
 say which side did not answer — that is not the same as it passing.
+
+If the code scan stops with `opengrep binary download declined`, kodem-cli has not
+downloaded its code scanner yet. Ask the developer whether to download it; if yes,
+re-run that scan once with the answer piped in (`printf 'y\n' | kodem-cli scan
+code-repository code …`). If no, continue with the open-source results and say the
+code side was not scanned.
 
 If either scan prints a `KODEM_UPDATE_AVAILABLE: <version>` trailer, a newer
 `kodem-cli` exists. Finish what you're doing first — the current results are still
@@ -343,12 +364,12 @@ validated bump that lowers breaking-change risk and includes base-image updates 
 local scan never sees.
 
 **Check the base image before working through packages one by one.** On a
-containerised repo it is usually the largest share of the backlog and one `FROM`
+containerized repo it is usually the largest share of the backlog and one `FROM`
 line clears many issues at once, so it is the first thing to *look at* — but it does
 not change the ranking (see Ordering rule) and it is **never auto-applied** (see
 Out of scope): always surface it and let the developer decide.
 
-- **Recognise them:** `introducedThroughInsights.fromBaseImage`. The flag is
+- **Recognize them:** `introducedThroughInsights.fromBaseImage`. The flag is
   tri-state like `isDirect`/`isIndirect` — `true`, `false`, or absent/`null`
   meaning unknown. Treat only `true` as confirmed, and don't assume `null` means
   "not from the base image". The package is not in any manifest you can edit — it
@@ -641,9 +662,9 @@ fuzzy description against `packageName` / `cwe` / `riskId`. Narrow with a filter
 first when you can (e.g. `--package lodash` for "the lodash one") to keep the set
 small, then match.
 
-## Fallback tiers — always state which tier you're in
+## Fallback tiers — state the tier when it isn't Full
 
-The skill never silently does less; it says what context it has.
+The skill never silently does less; when context is missing, it says so in one sentence.
 
 - **Full** (connected, mapped, Kai enabled): full value — rank and fix as above.
 - **No runtime / no correlation** (no sensor, or code repo and image not
