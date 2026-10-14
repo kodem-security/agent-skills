@@ -123,17 +123,46 @@ def check_auth():
              "— run: kodem-cli auth login")
 
 
+def repo_name_from_remote(url):
+    """The name Kodem knows the repo by: the remote's path, e.g. acme/store-api,
+    group/sub/repo on GitLab, org/project/repo on Azure DevOps. Mirrors
+    repo_name_from_remote in kodem-security/scripts/scan.sh."""
+    url = url.strip()
+    url = url[:-1] if url.endswith("/") else url
+    url = url[:-4] if url.endswith(".git") else url
+    if url.startswith("file://"):
+        return ""
+    if "://" in url:
+        path = url.split("://", 1)[1]
+        path = path.split("@", 1)[-1]
+        host, _, path = path.partition("/")
+    elif ":" in url:
+        host, _, path = url.partition(":")
+        host = host.split("@", 1)[-1]
+    else:
+        return ""
+    # Azure DevOps: dev.azure.com/org/project/_git/repo, ssh.dev.azure.com:v3/org/project/repo,
+    # org.visualstudio.com/[DefaultCollection/]project/_git/repo
+    if "dev.azure.com" in host:
+        path = path[3:] if path.startswith("v3/") else path
+    elif ".visualstudio.com" in host:
+        path = host.split(".", 1)[0] + "/" + (path[18:] if path.startswith("DefaultCollection/") else path)
+    if ("azure.com" in host or "visualstudio.com" in host) and "/_git/" in path:
+        project, _, repo = path.partition("/_git/")
+        path = f"{project}/{repo}"
+    return path.replace("%20", " ")
+
+
 def derive_repo_name(repo_root):
     proc = subprocess.run(["git", "-C", repo_root, "remote", "get-url", "origin"],
                           capture_output=True, text=True)
     if proc.returncode != 0:
         fail(1, "cannot derive the repo name (no 'origin' remote) — pass --repo-name org/repo")
-    url = proc.stdout.strip().rstrip("/")
-    name = re.sub(r"\.git$", "", url)
-    m = re.search(r"[:/]([^/:]+/[^/]+)$", name)
-    if not m:
-        fail(1, f"cannot parse org/repo from remote '{url}' — pass --repo-name org/repo")
-    return m.group(1)
+    url = proc.stdout.strip()
+    name = repo_name_from_remote(url)
+    if not name:
+        fail(1, f"cannot derive the repo name from remote '{url}' — pass --repo-name org/repo")
+    return name
 
 
 def pull_issues(repo_name, scope_args):
