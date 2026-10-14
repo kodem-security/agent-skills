@@ -123,9 +123,30 @@ record_clean_scan() {
   [ -z "$id" ] || printf '%s %s' "$id" "$(command -v kodem-cli)" \
     > "/tmp/.kodem-skill-scan-$(cd "$REPO_ROOT" && pwd -P | shasum | cut -c1-16)" 2>/dev/null || true
 }
-REPO_NAME=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null \
-  | sed 's|\.git$||' | sed -E 's|.*/||') \
-  || REPO_NAME=$(basename "$REPO_ROOT")
+# The name Kodem knows the repo by: the remote's path, e.g. acme/store-api,
+# group/sub/repo on GitLab, org/project/repo on Azure DevOps.
+repo_name_from_remote() { # <remote url>
+  local url="${1%/}" host path
+  url="${url%.git}"
+  case "$url" in
+    file://*) return 0 ;;
+    *://*)    path="${url#*://}"; path="${path#*@}"; host="${path%%/*}"; path="${path#*/}" ;;
+    *:*)      host="${url%%:*}"; host="${host#*@}"; path="${url#*:}" ;;
+    *)        return 0 ;;
+  esac
+  # Azure DevOps: dev.azure.com/org/project/_git/repo, ssh.dev.azure.com:v3/org/project/repo,
+  # org.visualstudio.com/[DefaultCollection/]project/_git/repo
+  case "$host" in
+    *dev.azure.com*)     path="${path#v3/}" ;;
+    *.visualstudio.com*) path="${host%%.*}/${path#DefaultCollection/}" ;;
+  esac
+  case "$host:$path" in *azure.com*/_git/*|*visualstudio.com*/_git/*)
+    path="${path%%/_git/*}/${path#*/_git/}" ;;
+  esac
+  printf '%s' "${path//\%20/ }"
+}
+REPO_NAME="$(repo_name_from_remote "$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)")"
+[ -n "$REPO_NAME" ] || REPO_NAME="$(basename "$REPO_ROOT")"
 BRANCH_NAME=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
 [ -n "$REPO_NAME_OVERRIDE" ] && REPO_NAME="$REPO_NAME_OVERRIDE"

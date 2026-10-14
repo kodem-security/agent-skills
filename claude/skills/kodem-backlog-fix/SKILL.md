@@ -73,8 +73,11 @@ the remote:
 git remote get-url origin
 ```
 
-Normalize to `org/repo` (strip the host and any `.git`, e.g.
-`git@github.com:acme/store-api.git` → `acme/store-api`). You'll pass this as
+Normalize to the remote's full path: strip the scheme, any `user@`, the host and
+any `.git`, the same name the prevention scan sends (e.g.
+`git@github.com:acme/store-api.git` → `acme/store-api`; a GitLab subgroup keeps
+every level, `group/sub/repo`; Azure DevOps drops `_git` or `v3`, giving
+`org/project/repo`). You'll pass this as
 `--repository-name` in the next step; the CLI resolves it for you.
 
 If the CLI later reports the repo can't be mapped ("code repository not found"),

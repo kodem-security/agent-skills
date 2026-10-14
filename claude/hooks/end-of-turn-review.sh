@@ -244,17 +244,14 @@ if [ "$HAS_SOURCE" = true ] && [ -n "$BASE" ]; then
   fi
 fi
 
-REPO_NAME="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed 's|\.git$||' | sed -E 's|.*/||')"
-[ -n "$REPO_NAME" ] || REPO_NAME="$(basename "$REPO")"
-BRANCH_NAME="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-
 if [ "$HAS_SOURCE" = false ] && [ "$HAS_MANIFEST" = false ]; then
   reset_state
   clear_baseline
   exit 0
 fi
 
-SCAN_ARGS=(--no-trace --repo-name "$REPO_NAME" --branch-name "$BRANCH_NAME")
+# scan.sh names the repo and branch from "$REPO" itself.
+SCAN_ARGS=(--no-trace)
 if [ "$HAS_SOURCE" = true ]; then
   if [ -n "$WT_DIR" ]; then SCAN_ARGS+=(--sast-worktree "$WT_DIR")
   else                      SCAN_ARGS+=(--sast-dir "$CUR_DIR"); fi

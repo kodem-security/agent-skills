@@ -89,7 +89,8 @@ guidance. Which policy status markers actually appear depends on the tenant's
 configured policies — a tenant may only ever emit `[PASSED]`/`[FAILED]`.
 
 **Policy enforcement:**
-The scan script passes `--code-repository-name` and `--policy-type all` so
+The scan script passes `--code-repository-name` (the origin remote's full path,
+e.g. `acme/store-api`) and `--policy-type all` so
 kodem-cli evaluates both **CI policies** (the same rules CI enforces) and
 **SCM policies** (the rules that would block a PR/MR merge in GitHub/GitLab/
 Azure DevOps). Either category can fail the scan — the worst verdict wins,
