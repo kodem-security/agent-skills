@@ -3,13 +3,13 @@
   "hooks": {
     "beforeSubmitPrompt": [
       {
-        "command": "bash \"${CURSOR_PLUGIN_ROOT}/hooks/capture-baseline.sh\" --platform cursor",
+        "command": "kodem-cli agent hook start --platform cursor || echo '{\"continue\":true}'",
         "timeout": 120
       }
     ],
     "stop": [
       {
-        "command": "bash \"${CURSOR_PLUGIN_ROOT}/hooks/end-of-turn-review.sh\" --platform cursor",
+        "command": "kodem-cli agent hook stop --platform cursor",
         "timeout": 600,
         "loop_limit": 3
       }

@@ -10,8 +10,8 @@ and how to ask for it is described in each skill's `SKILL.md`.
 
 ## Requirements
 
-`git`, `jq` and `python3` on the PATH. `kodem-cli`, which the plugin installs
-for you if it is missing.
+`git` and `kodem-cli` on the PATH; the plugin installs `kodem-cli` for you if it is
+missing. Restart the agent after the first install, so its hooks find `kodem-cli`.
 
 All three skills authenticate to the Kodem platform, so each developer needs a
 Kodem user. Report needs one with access to all resources. Backlog-fix works

@@ -20,8 +20,9 @@ or with an API key.
   the MD5 the storage bucket reports for the file, and refused if it doesn't
   match. This detects corrupted or altered downloads, not a compromised bucket.
 - **`kodem-cli`'s code scanner** (opengrep) is downloaded by `kodem-cli` into
-  `~/.kodem` before the first code scan, after you approve it. The prevention
-  hook never approves it; until it is there, the hook skips code scanning.
+  `~/.kodem` on the first code scan, the skills' or the prevention hook's, from
+  the same public bucket as `kodem-cli`. An older opengrep on your PATH is left in
+  place; `kodem-cli` uses its own copy.
 - **The prevention hook** never edits your files, index or branches. To diff a
   turn it writes a snapshot commit object into `.git/objects` (never referenced
   by a branch), creates a temporary `git worktree` that it removes afterwards,

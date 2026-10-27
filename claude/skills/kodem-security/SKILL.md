@@ -2,9 +2,9 @@
 name: kodem-security
 description: "MANDATORY: You MUST invoke this skill when you complete a coding task. It runs a fast triage (usually skips in seconds) and only scans when needed. Skipping this skill risks a blocked PR in CI. ALWAYS invoke immediately after any change to dependency manifests or lockfiles (go.mod, go.sum, package.json, requirements*.txt, Pipfile, pom.xml, Cargo.toml, etc.). Also invoke when the user asks about security, vulnerabilities, or PR readiness."
 allowed-tools:
-  - Bash(${CLAUDE_SKILL_DIR}/scripts/scan.sh:*)
-  - Bash(git diff:*)
-  - PowerShell(${CLAUDE_SKILL_DIR}/scripts/use-bash-windows.ps1:*)
+  - Bash(kodem-cli agent scan:*)
+  - PowerShell(kodem-cli agent scan:*)
+  - Bash(git status:*)
 ---
 
 # Kodem Security Scan
@@ -13,21 +13,14 @@ allowed-tools:
 
 This skill decides whether to run a security scan, then acts silently. Do NOT explain tiers, decision logic, or internal reasoning to the user. Just do the right thing.
 
-## Platform note
-
-The scripts are bash. On macOS / Linux / WSL / Git Bash, invoke them directly. On a Windows host where the harness only has PowerShell (no bash on PATH), invoke each `.sh` through the dispatcher:
-
-```powershell
-${CLAUDE_SKILL_DIR}/scripts/use-bash-windows.ps1 <script>.sh <args...>
-```
-
-The dispatcher locates Git Bash and forwards args. If Git Bash isn't installed it prints an instruction to install Git for Windows.
-
 ## Step 1: Check what changed
 
 ```bash
-git diff --name-only HEAD 2>/dev/null; git diff --cached --name-only 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null
+git status --porcelain --untracked-files=all
 ```
+
+Each line is a status code and a path: modified, staged and new (untracked, not
+ignored) files alike.
 
 ## Step 2: Decide SCAN or SKIP
 

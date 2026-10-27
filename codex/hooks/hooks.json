@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$PLUGIN_ROOT/hooks/capture-baseline.sh\" --platform codex",
+            "command": "kodem-cli agent hook start --platform codex",
             "timeout": 120
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$PLUGIN_ROOT/hooks/end-of-turn-review.sh\" --platform codex",
+            "command": "kodem-cli agent hook stop --platform codex",
             "timeout": 600
           }
         ]

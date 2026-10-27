@@ -4,37 +4,53 @@
 
 ## Running the scan
 
-Run the scan script. It handles PATH setup, baseline creation, SCA, SAST,
-and cleanup automatically:
+Run the scan through kodem-cli. It handles the baseline, both scans and cleanup, in
+any shell:
 
 ```bash
-<skill-dir>/scripts/scan.sh <repo-root>
-```
-
-Windows / PowerShell-only:
-
-```powershell
-<skill-dir>/scripts/use-bash-windows.ps1 scan.sh <repo-root>
+kodem-cli agent scan <repo-root>
 ```
 
 **CRITICAL**: Always use the full path directly — do NOT assign to a variable,
 as that breaks the tool-approval allowlist.
 
-The script outputs open-source and code results sequentially. It never
-installs or updates kodem-cli itself:
+The scan prints open-source and code results in turn. It never installs or
+updates kodem-cli itself:
 
-- **`KODEM_RESULT: cli-missing`** — kodem-cli is not installed. Ask the user
-  whether to install it. If yes, run the installer (below), then re-run the
-  scan once. If no, stop.
-- **"kodem-cli is too old for this scan"** — ask the user whether to update it.
-  If yes, run the installer, then re-run the scan once.
-- **`KODEM_RESULT: scanner-missing`** — kodem-cli needs to download its code
-  scanner (opengrep, from `public.kodemsecurity.com`) before the first code scan.
-  Ask the user whether to download it. If yes, re-run the same scan once with
-  `--accept-scanner-download`. If no, report the open-source results only.
+- **`kodem-cli` not found** — it may be installed but not on this session's PATH
+  yet. Right after an install in this session, call it by the path the installer
+  printed (`kodem-cli installed at <path>`): `"<path>" agent scan <repo-root>`, or
+  `& "<path>" agent scan <repo-root>` in PowerShell. Otherwise try the installer's
+  default folder: `"$HOME/.local/bin/kodem-cli" agent scan <repo-root>`, or
+  `& "$env:USERPROFILE\.local\bin\kodem-cli.exe" agent scan <repo-root>` in
+  PowerShell. Only if that isn't there either is kodem-cli not installed: ask the user whether to
+  install it. If yes, run the installer (below), then re-run the scan once, and
+  tell the developer to restart the agent: until then its end-of-turn check can't
+  find kodem-cli and doesn't run. If no, stop.
+- **The first code scan takes longer**: kodem-cli downloads its code scanner
+  (opengrep) by itself, or replaces an older one. Nothing to ask the developer.
+- **Code scan errors with `0xc0000135` or exit code `3221225781`** (Windows) — the
+  code scanner can't start because the Microsoft Visual C++ Redistributable (x64) is
+  missing. Tell the developer to install it
+  (https://aka.ms/vs/17/release/vc_redist.x64.exe), and report the open-source
+  results meanwhile.
 
-If both scans fail with auth errors, tell the user to run `kodem-cli auth
-login` to complete the browser OAuth flow.
+- **`KODEM_RESULT: auth-required`** — see **Signing in** below.
+
+## Signing in
+
+Signing in is the developer's step, never yours. Don't run `kodem-cli auth login`
+yourself: it opens a browser and waits up to five minutes for the sign-in, in a
+terminal the developer can't see. Ask them to run it in their own terminal; if the
+browser doesn't open, they open the URL it prints. Where a browser isn't an option,
+an API key in the `KODEM_API_KEY` environment variable works instead.
+
+Right after the installer has run, `kodem-cli` is not on PATH yet: the installer
+adds its folder to PATH (the user PATH on Windows, the shell profile elsewhere),
+which only new terminals see. Tell the developer to open a new terminal before
+`kodem-cli auth login`, and to restart the agent so its hooks find kodem-cli. In
+this session, call the CLI by the path the installer printed
+(`kodem-cli installed at <path>`), as `& "<path>"` in PowerShell.
 
 ## Diff baseline
 
@@ -52,18 +68,24 @@ a newer kodem-cli build is available. After presenting the scan results (do not
 hold them back — the current results are still valid), ask the user whether they
 want to update to `<version>`.
 
-- If **yes**: run the installer, then re-run the scan **once** with the same
-  arguments and use the fresh results. This is the same installer used above
-  for a missing or outdated kodem-cli.
+- If **yes**: update, then re-run the scan **once** with the same arguments and
+  use the fresh results:
+
+  ```bash
+  kodem-cli agent update
+  ```
+
+  If kodem-cli isn't installed, use the installer.
+  macOS and Linux:
 
   ```bash
   <skill-dir>/scripts/install.sh
   ```
 
-  Windows / PowerShell-only:
+  Windows (PowerShell):
 
   ```powershell
-  <skill-dir>/scripts/use-bash-windows.ps1 install.sh
+  powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-dir>/scripts/install.ps1"
   ```
 
 - If **no**: proceed with the results already in hand.
@@ -89,10 +111,10 @@ guidance. Which policy status markers actually appear depends on the tenant's
 configured policies — a tenant may only ever emit `[PASSED]`/`[FAILED]`.
 
 **Policy enforcement:**
-The scan script passes `--code-repository-name` (the origin remote's full path,
-e.g. `acme/store-api`) and `--policy-type all` so
-kodem-cli evaluates both **CI policies** (the same rules CI enforces) and
-**SCM policies** (the rules that would block a PR/MR merge in GitHub/GitLab/
+`kodem-cli agent scan` names the repository after the origin remote's full path
+(e.g. `acme/store-api`; pass `--repo-name <org/repo>` only when Kodem knows it by
+another name) and checks every policy type, so kodem-cli evaluates both
+**CI policies** (the same rules CI enforces) and **SCM policies** (the rules that would block a PR/MR merge in GitHub/GitLab/
 Azure DevOps). Either category can fail the scan — the worst verdict wins,
 so a passing CI policy will not rescue a failing SCM one.
 
@@ -107,16 +129,14 @@ Each policy line in the output is prefixed with its origin and category, e.g.
   mention the gap so the developer knows the server may decide otherwise
 - `NOT FOUND` — no policy configured for this repo in either CI or SCM
 
-The script's wrapper exit codes are:
+`kodem-cli agent scan` exit codes are:
 - `0` — clean OR non-blocking findings (status in trailer line)
 - `5` — policy-blocked findings; caller should block the action
 - `10` — scan errored (CLI ran but did not produce usable results)
-- `11` — kodem-cli is not installed; caller should not block
 - `12` — not authenticated; caller should not block
-- `13` — kodem-cli's code scanner isn't downloaded yet; caller should not block
 
 A trailer line `KODEM_RESULT: <status>` is always emitted — values: `clean`,
-`warn`, `blocked`, `scan-error`, `cli-missing`, `auth-required`, `scanner-missing`.
+`warn`, `blocked`, `scan-error`, `auth-required`.
 
 **When policy status is `NOT FOUND`**, report all findings by severity but
 do not block the developer — there is no policy to enforce.
@@ -163,3 +183,5 @@ After every scan, show this to the developer:
 > - **Critical:** N | **High:** N | **Medium:** N | **Low:** N
 > - **Findings:** [brief description of what needs attention]
 > - **Result:** Ready to commit / Fix required before commit
+> - **Setup:** (only if you installed kodem-cli in this session) Restart the agent:
+>   until then its end-of-turn check can't find kodem-cli and doesn't run.

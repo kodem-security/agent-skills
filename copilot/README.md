@@ -11,8 +11,8 @@ and how to ask for it is described in each skill's `SKILL.md`.
 
 ## Requirements
 
-`git`, `jq` and `python3` on the PATH. `kodem-cli`, which the plugin installs
-for you if it is missing.
+`git` and `kodem-cli` on the PATH; the plugin installs `kodem-cli` for you if it is
+missing. Restart the agent after the first install, so its hooks find `kodem-cli`.
 
 All three skills authenticate to the Kodem platform, so each developer needs a
 Kodem user. Report needs one with access to all resources. Backlog-fix works
@@ -79,10 +79,9 @@ files. Allow it for the session.
 
 ## Windows
 
-The hooks are bash scripts, and Copilot runs a hook's `bash` command only where
-bash is available. On a PowerShell-only Windows machine prevention does not run;
-install Git for Windows. The skills themselves fall back to PowerShell through
-`use-bash-windows.ps1`.
+The hooks and skills run through `kodem-cli agent`, in PowerShell as in bash: no Git
+Bash, `jq` or Python needed. Code scans need the Microsoft Visual C++ Redistributable
+(x64).
 
 ## Uninstall
 

@@ -5,27 +5,18 @@ description: "MANDATORY: You MUST invoke this skill when you complete a coding t
 
 # Kodem Security Scan
 
-`<skill-dir>` below is this skill's base directory: the folder that contains this file. Use its absolute path in commands.
-
 ## How this works
 
 This skill decides whether to run a security scan, then acts silently. Do NOT explain tiers, decision logic, or internal reasoning to the user. Just do the right thing.
 
-## Platform note
-
-The scripts are bash. On macOS / Linux / WSL / Git Bash, invoke them directly. On a Windows host where the harness only has PowerShell (no bash on PATH), invoke each `.sh` through the dispatcher:
-
-```powershell
-<skill-dir>/scripts/use-bash-windows.ps1 <script>.sh <args...>
-```
-
-The dispatcher locates Git Bash and forwards args. If Git Bash isn't installed it prints an instruction to install Git for Windows.
-
 ## Step 1: Check what changed
 
 ```bash
-git diff --name-only HEAD 2>/dev/null; git diff --cached --name-only 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null
+git status --porcelain --untracked-files=all
 ```
+
+Each line is a status code and a path: modified, staged and new (untracked, not
+ignored) files alike.
 
 ## Step 2: Decide SCAN or SKIP
 

@@ -3,6 +3,7 @@ name: kodem-backlog-fix
 description: "Fix a repo's EXISTING Kodem Security backlog — the open SCA and SAST issues already in the Kodem platform — prioritized by Kodem Score (runtime reachability + exploitability + severity). Use this whenever a developer asks to fix, triage, or work through their security issues/backlog/vulnerabilities: 'fix my issues', 'fix the backlog', 'fix all critical and high', 'fix the runtime-reachable ones', 'just the dependencies', 'fix everything from lodash', 'grab the quick wins', 'fix CVE-2024-3094', a pasted Kodem issue link, or 'fix the issue on <ticket_id>'. This is DIFFERENT from the prevention scan (which only checks the diff you just wrote) — this pulls and fixes issues that already exist in the repo. Requires Kodem platform access (OAuth or API key)."
 allowed-tools:
   - Bash(kodem-cli:*)
+  - PowerShell(kodem-cli:*)
   - Bash(git remote get-url:*)
   - Bash(git rev-parse:*)
   - Read
@@ -33,8 +34,10 @@ short; these limits take precedence over the wording of the steps below.
 
 - Don't narrate the steps (scope resolution, which commands you ran, why). Speak up
   only when something failed or needs a decision.
-- **Plan (Step 3):** two or three sentences, then at most 10 item lines. If more
-  issues qualify, say how many and that they can ask for them.
+- **Plan (Step 3):** two or three sentences, then at most 10 item lines, each one
+  issue (or one bump that clears several): never fold findings into a count like
+  "23 code findings". If more issues qualify, say how many and that they can ask
+  for them.
 - **Fallback tier:** mention it only when it isn't Full, in one sentence.
 - **Hand-back (Step 6):** at most six lines: what changed, the test command and its
   result, policy before → after (if one was breaching), what's left, that the
@@ -51,18 +54,33 @@ authenticated before anything else:
 kodem-cli auth status
 ```
 
-- **CLI not installed** → install it with this skill's own installer:
-  `${CLAUDE_SKILL_DIR}/scripts/install.sh` (the same script
-  updates an existing CLI). Running it needs the developer's approval — if they
+- **CLI not installed** → install it with this skill's
+  own installer: `${CLAUDE_SKILL_DIR}/scripts/install.sh` on macOS and Linux, or in
+  PowerShell `powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_SKILL_DIR}/scripts/install.ps1"`.
+  To update an installed CLI, `kodem-cli agent update`.
+  Installing needs the developer's approval — if they
   decline, say the backlog can't be read without the CLI and stop rather than
   retrying. Otherwise re-run `kodem-cli auth status` and carry on. Only
   if the installer isn't present — skills delivered as separate files rather than
   together — ask the user to install `kodem-cli` from their Kodem onboarding and
   stop until it's available.
-- **Not authenticated** → tell the user to run `kodem-cli auth login` (browser
-  OAuth) and stop. Without platform access this skill can't run — say so plainly.
+- **Not authenticated** → ask the developer to run `kodem-cli auth login` (browser
+  OAuth) in their own terminal — see **Signing in** below — and stop. Without platform access this skill can't run — say so plainly.
   No Kodem skill can: every scan mode needs a valid token, so an expired one stops
   prevention too.
+
+**Right after the installer runs**, `kodem-cli` isn't on PATH in this session (only new terminals see the PATH it
+added): call it by the path the installer printed (`kodem-cli installed at <path>`),
+until then: `"<path>"`, or `& "<path>"` in PowerShell. Likewise, before treating `kodem-cli` "not found" as not
+installed, try the installer's default folder: `"$HOME/.local/bin/kodem-cli"` (macOS,
+Linux) or `& "$env:USERPROFILE\.local\bin\kodem-cli.exe"` (PowerShell).
+
+**Signing in is the developer's step, never yours.** Don't run `kodem-cli auth
+login` yourself: it opens a browser and waits up to five minutes for the sign-in,
+in a terminal the developer can't see. Ask them to run it in their own terminal (a
+new one on Windows, if the CLI was just installed); if the browser doesn't open,
+they open the URL it prints. Where a browser isn't an option, an API key in the
+`KODEM_API_KEY` environment variable works instead.
 
 ## Step 1 — Identify the repo
 
@@ -112,12 +130,6 @@ Returns `{ "data": { "count": N, "scopes": [ { "id", "name", "isAllResources" } 
   pass a scope — resolving it for them is the whole point.
 - **Empty list** → the caller has no scopes and can't read this tenant's backlog.
   Say so and offer the agent-native fallback (see Fallback tiers).
-- **`scopes list` isn't a known command, or 404s** → the installed `kodem-cli`
-  predates scope resolution. Update it per the **unknown command / unknown flag**
-  reaction in Step 2. If it still isn't available, run Step 2 once without
-  `--scope-id`: that works for all-resources callers, and a 403 then means this
-  developer needs the newer CLI to read a restricted backlog — say so plainly
-  rather than treating the missing command as fatal.
 
 ### Fan-out and aggregate (restricted callers only)
 
@@ -199,10 +211,6 @@ On failure, react by the message:
   an **all-resources** read (no `--scope-id`) 403s, or **every** resolved scope
   403s for this repo, does the caller genuinely lack access — switch to the
   **agent-native fallback** (see Fallback tiers). Don't retry the same call.
-- **unknown command / unknown flag** → the installed CLI is too old for these
-  read commands. Update it with the prevention skill's installer
-  (`${CLAUDE_SKILL_DIR}/scripts/install.sh`), then retry once;
-  if the reads are still unavailable, say a newer `kodem-cli` is required and stop.
 - **token expired** (can arrive with exit 0 — see above) → tell the user to run
   `kodem-cli auth login`, and stop.
 - anything else (5xx / network) → **retry once; if it still fails, report the error
@@ -298,12 +306,6 @@ kodem-cli scan code-repository code <repo-root> \
 Merge the verdicts from both before reporting anything. If one variant errors,
 say which side did not answer — that is not the same as it passing.
 
-If the code scan stops with `opengrep binary download declined`, kodem-cli has not
-downloaded its code scanner yet. Ask the developer whether to download it; if yes,
-re-run that scan once with the answer piped in (`printf 'y\n' | kodem-cli scan
-code-repository code …`). If no, continue with the open-source results and say the
-code side was not scanned.
-
 If either scan prints a `KODEM_UPDATE_AVAILABLE: <version>` trailer, a newer
 `kodem-cli` exists. Finish what you're doing first — the current results are still
 valid — then offer the update once, using the same installer as the prerequisite.
@@ -356,6 +358,11 @@ doesn't shrink the set.
 Show, per item: severity, a runtime indicator when present, Kodem Score, what it
 is, and Kodem's computed fix (the exact bump). Group into **safe fixes**, **Quick
 Wins**, and **needs review**. Keep it scannable.
+
+Every line is one item the developer can say yes or no to: one dependency bump, or
+one code finding with its file. Don't tally findings into a line ("16× XSS",
+"23 code findings"): list the highest-scoring ones up to the 10-line limit, then
+say how many more there are.
 
 ## Step 4 — Confirm
 

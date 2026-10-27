@@ -19,8 +19,9 @@ directly:
   or `/kodem-report`.
 - Codex: type `@` and pick Kodem Security or one of its skills.
 
-**Requirements:** a Kodem account, and `git`, `jq` and `python3` on the PATH.
-`kodem-cli` is installed on first use, after you approve it.
+**Requirements:** a Kodem account, and `git` on the PATH. `kodem-cli` (5.0.42 or
+later) is installed on first use, after you approve it; restart the agent afterwards so
+its hooks find it.
 [SECURITY.md](SECURITY.md) covers what runs, what it sends to Kodem, and what
 changes on your machine.
 
@@ -67,9 +68,9 @@ the same skills and hooks.
 
 ## Windows
 
-The hooks and scripts are bash. On Windows, install Git for Windows so Git Bash
-is available; the skills fall back to it from PowerShell through
-`use-bash-windows.ps1`.
+The hooks and skills run through `kodem-cli agent`, in PowerShell as in bash: no Git
+Bash, `jq` or Python needed. Windows x64 only. Code scans need the Microsoft Visual
+C++ Redistributable (x64).
 
 ## Help
 

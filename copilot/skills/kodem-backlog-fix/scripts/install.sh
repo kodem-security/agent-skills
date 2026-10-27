@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install or update kodem-cli: replaces every writable copy on PATH, else installs to ~/.local/bin.
+# Install or update kodem-cli on macOS or Linux: replaces every writable copy on PATH, else installs to
+# ~/.local/bin. Windows: install.ps1.
 # Usage: install.sh [version]   (or KODEM_CLI_VERSION; KODEM_CLI_INSTALL_DIR overrides the target)
 
 PUBLIC_BASE="https://public.kodemsecurity.com/artifacts/kodem-cli"
@@ -10,16 +11,17 @@ VERSION_SEG="${KODEM_CLI_VERSION:-${1:-latest}}"
 detect_platform() {
   local os="" arch=""
   case "$(uname -s)" in
-    Darwin)               os="darwin"  ;;
-    Linux)                os="linux"   ;;
-    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    Darwin) os="darwin" ;;
+    Linux)  os="linux"  ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "kodem-cli: on Windows, install it with install.ps1 from PowerShell." >&2
+      return 1 ;;
   esac
   case "$(uname -m)" in
     x86_64|amd64)  arch="amd64" ;;
     arm64|aarch64) arch="arm64" ;;
   esac
-  if [ -z "$os" ] || [ -z "$arch" ] || \
-     { [ "$os" = "windows" ] && [ "$arch" = "arm64" ]; }; then
+  if [ -z "$os" ] || [ -z "$arch" ]; then
     echo "kodem-cli: this OS/architecture is not supported." >&2
     return 1
   fi
@@ -58,7 +60,7 @@ HINT_DIR=""
 resolve_targets() {
   local binary_name="$1"
   if [ -n "${KODEM_CLI_INSTALL_DIR:-}" ]; then
-    HINT_DIR="$KODEM_CLI_INSTALL_DIR"
+    echo "hint:$KODEM_CLI_INSTALL_DIR"
     echo "$KODEM_CLI_INSTALL_DIR/$binary_name"
     return
   fi
@@ -75,7 +77,7 @@ resolve_targets() {
   done < <(type -aP "$binary_name" 2>/dev/null || true)
 
   if [ "$found" = false ]; then
-    HINT_DIR="$HOME/.local/bin"
+    echo "hint:$HOME/.local/bin"
     echo "$HOME/.local/bin/$binary_name"
   fi
 }
@@ -97,7 +99,7 @@ resolve_symlink() {
 # Stage, then mv: a new inode, so macOS doesn't SIGKILL the upgraded binary (exit 137).
 STAGED=""
 replace_binary() {
-  local src="$1" t="$2" dir old
+  local src="$1" t="$2" dir
   dir=$(dirname "$t")
   [ -d "$t" ] && return 1
   if [ ! -w "$dir" ]; then
@@ -112,20 +114,6 @@ replace_binary() {
   if mv -f "$STAGED" "$t" 2>/dev/null; then
     STAGED=""; return 0
   fi
-  # Windows can't overwrite a running .exe but can rename it; one fixed <name>.old, never deleted.
-  case "$t" in
-    *.exe)
-      old="$t.old"
-      if [ -f "$t" ] && [ ! -d "$old" ] && mv -f "$t" "$old" 2>/dev/null; then
-        if mv -f "$STAGED" "$t" 2>/dev/null; then
-          STAGED=""; return 0
-        fi
-        if ! mv -f "$old" "$t" 2>/dev/null; then
-          echo "WARNING: could not restore $t — the previous copy is at $old; rename it back." >&2
-        fi
-      fi
-      ;;
-  esac
   rm -f "$STAGED"; STAGED=""
   return 1
 }
@@ -142,18 +130,36 @@ smoke_test() {
   return 1
 }
 
+# Adds ~/.local/bin to PATH in the profile of the user's shell (zsh or bash), unless a line there already mentions it
+add_to_profile() {
+  local name profile
+  case "${SHELL:-}" in
+    */zsh|zsh)   name=.zshrc ;;
+    */bash|bash) name=.bashrc ;;
+    *) return 1 ;;
+  esac
+  profile="$HOME/$name"
+  if [ -e "$profile" ] && [ ! -r "$profile" ]; then return 1; fi
+  if grep -qF '.local/bin' "$profile" 2>/dev/null; then
+    echo "~/.local/bin is set in ~/$name. Open a new terminal for it to take effect."
+    return 0
+  fi
+  {
+    if [ -s "$profile" ] && [ -n "$(tail -c1 "$profile")" ]; then echo; fi
+    echo 'export PATH="$HOME/.local/bin:$PATH"'
+  } 2>/dev/null >> "$profile" || return 1
+  echo "Added ~/.local/bin to PATH in ~/$name. Open a new terminal for it to take effect."
+}
+
 main() {
+  if ! [[ "$VERSION_SEG" =~ ^(latest|v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+    echo "ERROR: invalid kodem-cli version: $VERSION_SEG" >&2
+    return 1
+  fi
   local platform
   platform=$(detect_platform) || return 1
 
-  local binary_name remote_name
-  if [[ "$platform" == windows-* ]]; then
-    binary_name="kodem-cli.exe"
-    remote_name="kodem-cli-${platform}.exe"
-  else
-    binary_name="kodem-cli"
-    remote_name="kodem-cli-${platform}"
-  fi
+  local binary_name="kodem-cli" remote_name="kodem-cli-${platform}"
 
   # Only ever delete our own temp files.
   trap '[ -z "${TMP_DL:-}" ] || rm -f "$TMP_DL" "$TMP_DL.headers"; [ -z "${STAGED:-}" ] || rm -f "$STAGED"' EXIT
@@ -164,7 +170,17 @@ main() {
   tmp=$(mktemp)
   TMP_DL="$tmp"
   echo "Downloading $remote_name ($VERSION_SEG)..."
-  if ! curl -fsSL --retry 3 -D "$tmp.headers" "$PUBLIC_BASE/$VERSION_SEG/$remote_name" -o "$tmp"; then
+  # HTTPS only, redirects included; at most 10 minutes. A dropped connection may not recur, so up to 3 tries; an
+  # HTTP error (22, e.g. no such release) would.
+  local attempt=1 rc
+  while :; do
+    rc=0
+    curl -fsSL --proto =https --proto-redir =https --max-time 600 --retry 3 -D "$tmp.headers" \
+      "$PUBLIC_BASE/$VERSION_SEG/$remote_name" -o "$tmp" || rc=$?
+    { [ "$rc" = 0 ] || [ "$rc" = 22 ] || [ "$attempt" -ge 3 ]; } && break
+    attempt=$((attempt + 1)); sleep 2
+  done
+  if [ "$rc" != 0 ]; then
     rm -f "$tmp" "$tmp.headers"
     echo "ERROR: failed to download kodem-cli ($VERSION_SEG) for $platform" >&2
     return 1
@@ -174,9 +190,19 @@ main() {
     return 1
   fi
   chmod +x "$tmp"
+  # A download that doesn't run replaces nothing
+  local rc=0
+  ( "$tmp" --help >/dev/null 2>&1; exit $? ) 2>/dev/null || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "ERROR: the downloaded kodem-cli doesn't run (--help exited $rc); nothing was replaced" >&2
+    return 1
+  fi
 
   local -a targets=()
-  while IFS= read -r line; do [ -n "$line" ] && targets+=("$line"); done < <(resolve_targets "$binary_name")
+  # resolve_targets runs in a subshell: it reports the PATH-hint folder as a "hint:" line, not in HINT_DIR
+  while IFS= read -r line; do
+    case "$line" in hint:*) HINT_DIR="${line#hint:}" ;; ?*) targets+=("$line") ;; esac
+  done < <(resolve_targets "$binary_name")
 
   local t real installed_any=false
   for t in "${targets[@]}"; do
@@ -199,6 +225,8 @@ main() {
     echo "ERROR: kodem-cli could not be installed to any writable location" >&2
     return 1
   fi
+  # An agent session started before the install doesn't see it: its end-of-turn check doesn't run until a restart
+  echo "Restart your agent so its Kodem hooks find kodem-cli."
 
   hash -r 2>/dev/null || true
   local active active_rp matched=false
@@ -206,7 +234,7 @@ main() {
   if [ -n "$active" ]; then
     active_rp=$(canonical_path "$active")
     for t in "${targets[@]}"; do
-      [ "$t" = "$active_rp" ] && matched=true
+      { [ "$t" = "$active_rp" ] || [ "$t" -ef "$active" ]; } && matched=true
     done
     if [ "$matched" != true ]; then
       echo "WARNING: an older kodem-cli at $active_rp shadows the update on PATH — remove it so the new version takes effect." >&2
@@ -217,28 +245,11 @@ main() {
   case ":$PATH:" in
     *":$HINT_DIR:"*) ;;
     *)
-      INSTALL_DIR="$HINT_DIR"
-      case "$(uname -s)" in
-        MINGW*|MSYS*|CYGWIN*)
-          # Not setx: it silently truncates PATH at 1024 chars.
-          win_dir=$(cygpath -w "$INSTALL_DIR")
-          if powershell.exe -NoProfile -Command "
-            \$cur = [Environment]::GetEnvironmentVariable('Path','User');
-            if (-not ((\$cur -split ';') -contains '$win_dir')) {
-              [Environment]::SetEnvironmentVariable('Path', \$cur + ';$win_dir', 'User')
-            }" >/dev/null 2>&1; then
-            echo "Added $win_dir to user PATH. Open a new terminal for it to take effect."
-          else
-            echo "WARNING: $INSTALL_DIR is not in your PATH and auto-update failed." >&2
-            echo "Add it manually:  setx Path \"%Path%;$win_dir\"" >&2
-          fi
-          ;;
-        *)
-          echo "WARNING: $INSTALL_DIR is not in your PATH." >&2
-          echo "Add this line to your shell profile:" >&2
-          echo "  export PATH=\"\$PATH:$INSTALL_DIR\"" >&2
-          ;;
-      esac
+      # Only the fallback ~/.local/bin goes into the shell's profile, never a KODEM_CLI_INSTALL_DIR
+      if [ -z "${KODEM_CLI_INSTALL_DIR:-}" ] && add_to_profile; then return 0; fi
+      echo "WARNING: $HINT_DIR is not in your PATH." >&2
+      echo "Add this line to your shell profile:" >&2
+      echo "  export PATH=\"\$PATH:$HINT_DIR\"" >&2
       ;;
   esac
 }

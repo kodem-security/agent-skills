@@ -3,14 +3,14 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "bash hooks/capture-baseline.sh --platform antigravity",
+        "command": "kodem-cli agent hook start --platform antigravity",
         "timeout": 120
       }
     ],
     "Stop": [
       {
         "type": "command",
-        "command": "bash hooks/end-of-turn-review.sh --platform antigravity",
+        "command": "kodem-cli agent hook stop --platform antigravity",
         "timeout": 600
       }
     ]

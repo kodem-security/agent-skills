@@ -2,8 +2,8 @@
 name: kodem-report
 description: "Read-only security report of a repo's Kodem state — full report or short posture summary. Makes ZERO changes to the repo: no fixes, no edits, no commits. Use this whenever someone wants to SEE their security state rather than fix it: 'full report', 'show me everything', 'security report', 'what's my posture?', 'what should I prioritize?', 'how bad is my backlog?', 'are we breaching any policies?', 'what would CI block?', 'give me an overview before we fix anything', or an AppSec manager asking for project status. This is DIFFERENT from kodem-backlog-fix (which applies fixes) and from the prevention scan (which checks the diff you just wrote). If the user asks to fix their security issues or backlog, use kodem-backlog-fix instead."
 allowed-tools:
-  - Bash(${CLAUDE_SKILL_DIR}/scripts/build-report.sh:*)
   - Bash(kodem-cli:*)
+  - PowerShell(kodem-cli:*)
   - Bash(git remote get-url:*)
   - Bash(git rev-parse:*)
   - Bash(git status:*)
@@ -29,7 +29,7 @@ Both end the same way: offer to hand straight to `kodem-backlog-fix`.
 
 ## How to answer
 
-The script's output is the report; what you add around it stays short.
+The command's output is the report; what you add around it stays short.
 
 - Before it: at most three sentences on what matters and the one thing to do first.
 - Each missing signal: one line. The fallback tier: only when it isn't Full.
@@ -45,10 +45,12 @@ The person running a report is often *deciding whether to trust the tooling*;
 an unexpected write, however helpful, breaks that trust permanently.
 
 - Run only read commands: `git remote get-url`/`rev-parse`/`status`, `kodem-cli`
-  reads, the report script below, and the policy-aware scan (which reads the
+  reads, the report command below, and the policy-aware scan (which reads the
   repo and reports — it changes nothing).
 - Report files are written to a **temp directory**, never into the repo. Only
-  save a copy inside the repo if the user explicitly asks for one there.
+  save a copy inside the repo if the user explicitly asks for one there: an
+  export ("export as CSV", "give me a CSV") isn't such a request. Give the temp
+  file's path.
 - If the user asks you to fix something mid-report, finish the report, then hand
   off to the `kodem-backlog-fix` skill **scoped to exactly what they asked** —
   its supported-requests table maps specific asks ("fix CVE-…", "fix the lodash
@@ -63,9 +65,10 @@ kodem-cli auth status
 ```
 
 - **CLI not installed** → the report needs `kodem-cli`. Install it with this skill's
-  own installer:
-  `${CLAUDE_SKILL_DIR}/scripts/install.sh` (the same script
-  updates an existing CLI). Running it needs the developer's approval — if they
+  own installer: `${CLAUDE_SKILL_DIR}/scripts/install.sh` on macOS and Linux, or in
+  PowerShell `powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_SKILL_DIR}/scripts/install.ps1"`.
+  To update an installed CLI, `kodem-cli agent update`.
+  Installing needs the developer's approval — if they
   decline, say the report needs the CLI and stop rather than retrying. If the
   installer isn't present (skills delivered as separate files), ask the user to
   install `kodem-cli` from their Kodem onboarding, and stop until it's available.
@@ -75,6 +78,19 @@ kodem-cli auth status
   plainly *why* the platform isn't available (no OAuth or API key — quote the
   CLI's own error) and that `kodem-cli auth login` unlocks the full report.
 - **Authenticated** → next step.
+
+**Right after the installer runs**, `kodem-cli` isn't on PATH in this session (only new terminals see the PATH it
+added): call it by the path the installer printed (`kodem-cli installed at <path>`),
+until then: `"<path>"`, or `& "<path>"` in PowerShell. Likewise, before treating `kodem-cli` "not found" as not
+installed, try the installer's default folder: `"$HOME/.local/bin/kodem-cli"` (macOS,
+Linux) or `& "$env:USERPROFILE\.local\bin\kodem-cli.exe"` (PowerShell).
+
+**Signing in is the developer's step, never yours.** Don't run `kodem-cli auth
+login` yourself: it opens a browser and waits up to five minutes for the sign-in,
+in a terminal the developer can't see. Ask them to run it in their own terminal (a
+new one on Windows, if the CLI was just installed); if the browser doesn't open,
+they open the URL it prints. Where a browser isn't an option, an API key in the
+`KODEM_API_KEY` environment variable works instead.
 
 ## Step 1 — Identify the repo
 
@@ -89,19 +105,19 @@ Normalize to `org/repo` (strip host and `.git`). If the pull later reports
 re-run with their answer (`--repo-name`). If the repo genuinely isn't in Kodem,
 fall back to a local scan (see Fallback tiers) and offer to connect it.
 
-Monorepos can span several Kodem projects; the report script detects and names
+Monorepos can span several Kodem projects; the report detects and names
 each project. Report them together.
 
-## Step 2 — Build the report (one script run)
+## Step 2 — Build the report (one command)
 
-The script does the whole deterministic part: pulls the data (every read
+`kodem-cli agent report` does the whole deterministic part: pulls the data (every read
 tagged `--skill-trigger` for usage attribution), computes exact counts, parses
 the policy verdicts, and renders a **complete, user-friendly report**. Your
 numbers come from it — never recompute or restate counts from memory.
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/build-report.sh <repo-root> --view full
-${CLAUDE_SKILL_DIR}/scripts/build-report.sh <repo-root> --view posture
+kodem-cli agent report <repo-root> --view full
+kodem-cli agent report <repo-root> --view posture
 ```
 
 Options you'll actually use:
@@ -136,9 +152,7 @@ saving the user tokens.
 | 3 | not authenticated | no-platform tier (Fallback tiers) |
 | 4 | repo not mapped | ask once for the Kodem name, retry with `--repo-name`; else not-mapped tier |
 | 5 | not authorized (key scope) | no-scope tier — don't retry, it won't help |
-| 6 | CLI too old for the read commands | update via the Step 0 installer, retry once; else local-scan report |
-| 7 | python3 missing | do the manual pull (see Fallback: manual pull) |
-| 1 | anything else | retry once, then report the script's error to the user |
+| 1 | anything else | retry once, then report the command's error to the user |
 
 ## Step 3 — Present and enrich
 
@@ -146,15 +160,15 @@ Pick the view from the ask: "full report" / "show me everything" → `--view ful
 "what's my posture?" / "what should I prioritize?" → `--view posture`; ambiguous →
 posture, then offer the full report.
 
-The script's output **is** the report — complete and correct on its own. Present
-it, then add the judgment a script can't:
+The command's output **is** the report — complete and correct on its own. Present
+it, then add the judgment a command can't:
 
 - Sharpen the overview: 2–3 plain sentences on what actually matters (real risk
   vs raw count, the one thing to do first).
-- Phrase the next steps for this user's context; keep the script's ordering.
-- Narrate the missing signals the script flagged (see Missing signals).
-- **Never alter the script's numbers, list, or ranking.** If something looks
-  wrong, say so — don't silently "fix" it. That includes the counts: the script
+- Phrase the next steps for this user's context; keep the command's ordering.
+- Narrate the missing signals the command flagged (see Missing signals).
+- **Never alter the command's numbers, list, or ranking.** If something looks
+  wrong, say so — don't silently "fix" it. That includes the counts: the command
   already excludes findings in this tool's own installed files (Claude Code's
   `.claude/skills/` and `.claude/plugins/`, the other hosts' plugin install
   directories, and this tool's own skills in any other host's `skills/`) and
@@ -167,7 +181,7 @@ it, then add the judgment a script can't:
   normal, not a scan error; say so rather than reconciling by hand.
 - **Call out the base image when it dominates.** On a containerized repo the base
   image is often most of the backlog, and that changes the answer to "what should I
-  prioritize?" from a list of packages to a single `FROM` bump. The script counts
+  prioritize?" from a list of packages to a single `FROM` bump. The command counts
   this for you — read it from `report.json`, don't re-derive it:
   `signals.base_image_findings` (findings with `from_base_image: true`) and
   `signals.base_image_fix_known` (how many carry a computed target). If the share is
@@ -195,12 +209,12 @@ traceable to the data.
    once a fix is *deployed* and the sensor stops seeing the vulnerable component
    — not the moment code is committed.
 
-(The script's render includes both as static lines; keep them, and make the
+(The command's render includes both as static lines; keep them, and make the
 hand-off offer conversationally too.)
 
 ## Missing signals — degrade, state it, don't break
 
-A report with a gap is still a report. The script detects the gaps and prints
+A report with a gap is still a report. The command detects the gaps and prints
 them under **Missing signals**; your job is to make sure they land:
 
 - **No runtime signal** (no sensor, or code repo and image not correlated) →
@@ -210,7 +224,7 @@ them under **Missing signals**; your job is to make sure they land:
 - **No policies configured** → say so; don't relabel high-score issues as
   "policy breaches".
 - **Empty backlog** → it's clean; policy state still shows; skip the fix offer.
-- **No lockfile for an npm/pnpm/yarn manifest** → the script detects this and
+- **No lockfile for an npm/pnpm/yarn manifest** → the command detects this and
   emits it under **Missing signals**; relay that note, don't re-derive it. The
   consequence is stronger than stale data: the platform reads the resolved tree
   out of the lockfile, so those JavaScript dependencies are **not scanned at all**
@@ -257,32 +271,6 @@ Never fabricate a value the platform didn't return.
   policies. Offer `kodem-cli auth login`. Some CLI builds refuse to scan without
   credentials at all — if so, say exactly that and fall back to the agent-native
   overview above (clearly labeled).
-- **Manual pull** (exit 7 — no python3): do the script's job by hand, keeping the
-  same output shape (overview · summary table · policies · complete findings list
-  · next steps). The reads:
-
-  ```bash
-  kodem-cli issues list --repository-name "<org/repo>" --skill-trigger --json --limit 0
-  kodem-cli issues quick-wins --project "<projectId>" --skill-trigger --json
-  kodem-cli scan code-repository open-source <repo-root> \
-    --code-repository-name "<org/repo>" --policy-type all --skill-trigger \
-    --description "report: read-only posture check"
-  kodem-cli scan code-repository code <repo-root> \
-    --code-repository-name "<org/repo>" --policy-type all --skill-trigger \
-    --description "report: read-only posture check"
-  ```
-
-  Run **both** policy scans — open-source and code policies are distinct rule
-  sets; checking only one reads as a clean bill of health on the other.
-
-  Per issue you get: `kodemScore`, `category` (sca/sast), `severity`, `riskId`,
-  `packageName`, `cwe`, `riskInsights` (`runtime`, `exploitMaturity`),
-  `fixInsights` + `fixVersions` (the computed fix), `issueKaiAnalysis.isFalsePositive`
-  (Kai verdict — SAST only, when enabled), `status`, `uiLink`. An issue with
-  `status: "open"` counts as open even if it carries a `dismissReason`. Policy
-  verdict lines are prefixed `[CI · …]` / `[SCM · …]` (distinct rule sets — name
-  the right one; worst verdict wins) or `NOT FOUND` when none configured.
-
 ## Supported requests
 
 | The user says | What you do |
