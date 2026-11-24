@@ -90,10 +90,10 @@ want to update to `<version>`.
 
 Do this at most **once** — never loop on the update notice. If the marker
 reappears after updating, do not update again. This usually means the new
-binary is shadowed on PATH by an older copy; the installer prints a
-`WARNING: an older kodem-cli at <path> shadows the update` line naming the
-file to remove. Surface that path to the user, then continue with the
-current results.
+binary is shadowed on PATH by an older copy. On macOS and Linux the installer
+prints a `WARNING: an older kodem-cli at <path> shadows the update` line naming
+the file to remove; the Windows installer doesn't check for this. Surface that
+path to the user, then continue with the current results.
 
 If kodem-cli exits with code **137** (`SIGKILL`, often "Code Signature
 Invalid") right after an update on macOS, tell the user to close any running
@@ -102,30 +102,103 @@ kodem-cli and run the installer again. The installer's
 
 ## Reading results
 
-The CLI outputs human-readable text. Open-source results show a table with
-Package, Version, CVE, Severity, and Fixed In (some CLI versions also include a
-CVSS column). Code results show File, Severity, CWE, description, and fix
+The CLI outputs human-readable text. Open-source results show a table with the
+package, version, vulnerability (CVE), severity and the "Fixed In" version; newer
+CLI versions also show a CVSS column. Code results show File, Severity, CWE, description, and fix
 guidance. Which policy status markers actually appear depends on the tenant's
 configured policies — a tenant may only ever emit `[PASSED]`/`[FAILED]`.
 
 **Policy enforcement:**
 `kodem-cli agent scan` names the repository after the origin remote's full path
-(e.g. `acme/store-api`; pass `--repo-name <org/repo>` only when Kodem knows it by
-another name) and checks every policy type, so kodem-cli evaluates both
-**CI policies** (the same rules CI enforces) and **SCM policies** (the rules that would block a PR/MR merge in GitHub/GitLab/
-Azure DevOps). Either category can fail the scan — the worst verdict wins,
-so a passing CI policy will not rescue a failing SCM one.
+(e.g. `acme/store-api`), or the folder name when there is no origin remote. Pass `--repo-name <org/repo>` only when Kodem knows it by
+another name. It checks every policy type (`--policy-type all`). Kodem has one
+list of policies. Each policy runs on pull requests (SCM), on CI scans, or both,
+so kodem-cli evaluates the policies the **CI** rules enforce and the policies
+that would block a PR/MR merge in GitHub/GitLab/Azure DevOps/Bitbucket.
 
-Each policy line in the output is prefixed with its origin and category, e.g.
-`[CI · Open Source]` or `[SCM · Code]`. Status markers:
+**Every matching policy runs.** Each finding gets one result from all the
+policies that matched it: Suppress beats Fail, and Fail beats Warn. The scan
+fails when at least one finding is failed and not suppressed. Policy order does
+not matter, and a passing policy never rescues a finding that another policy
+fails.
+
+Newer kodem-cli versions start with a `Policy result: Fail`, `Warn` or `Pass`
+block that lists the triggered policies by name and counts the evaluated ones.
+That block's `Policy result` is the scan's verdict. Older versions have no
+block: read the per-policy lines alone. Each
+policy has its own line, prefixed with its origin and category, e.g.
+`[CI · Open Source]` or `[SCM · Code]`. A policy's line shows that policy's own
+result, so a `[WARN AND PASS]` line next to a `Policy result: Fail` means another
+policy fails the scan. Status markers:
 - `[PASSED]` — no policy violations, safe to commit
 - `[FAILED]` — findings blocked by policy, must fix; each blocked finding is
   listed under the policy on its own line
 - `[WARN AND PASS]` — violations found but policy action is warn-only
-- `[PARTIAL]` — some conditions couldn't be evaluated locally (e.g. runtime
-  reachability, Kai confirmation); the evaluated conditions still pass, but
-  mention the gap so the developer knows the server may decide otherwise
-- `NOT FOUND` — no policy configured for this repo in either CI or SCM
+- `[PARTIAL]` — a condition couldn't be checked here, for example a Kai
+  condition, or runtime facts that couldn't be fetched; the checked conditions still
+  pass, but mention the gap so the developer knows the server may decide otherwise
+- `NOT FOUND` — no open-source policy configured for this repo (the line
+  `Policy Status: NOT FOUND`). The code scan prints no such line: no
+  `[… · Code]` line and exit 0 means there is no code policy.
+
+Under a policy, `Active Suppression Policies` names the Suppress policies in
+play, and `Suppressed Violations` lists the findings they hid with the policy
+that did it. Report suppressed findings as suppressed, never as fixed. Never
+treat a finding under `Suppressed Violations` as one to fix.
+
+**Policy notes and warnings** are lines that start with `[!] Policy note`,
+`[!] Policy warning` or `[!] Suppress policy`. They never change the exit code,
+apart from an unknown-action `Policy note`: that policy's action counts as Fail,
+so a finding it matches blocks (exit 9). Read them and tell the developer:
+- `[!] Policy note: … has a type or action this version does not know …: it
+  fails`: an unknown action counts as Fail, so a finding the policy matches
+  **blocks**. Suggest `kodem-cli agent update`.
+- `[!] Policy warning: … this CLI version cannot read … Update the CLI`: the
+  unreadable part, or the whole policy, was skipped and the rest was checked.
+  Suggest `kodem-cli agent update`.
+- `[!] Suppress policy … unknown key`: that Suppress policy **does
+  not suppress**. Its findings still count, so a Fail policy can still block.
+  Suggest `kodem-cli agent update`.
+- `[!] Policy warning` or `[!] Policy note` ending `not evaluated in CLI`: the
+  policy uses a condition only the platform checks, such as an issue or
+  advisory age (SLA). Updating does not help. The server decides, so its
+  verdict may differ.
+- `[!] Policy warning: … Kai results are not available in the CLI`: the CLI
+  never has Kai results. In a Protect policy the Kai condition was left out (or
+  the group skipped, if it had only Kai conditions). In a Suppress policy the
+  warning ends `so that Suppress group hides nothing`: that group hides
+  nothing. Updating does not help.
+- `[!] Policy warning: the platform's runtime and exploit maturity facts could
+  not be fetched`: policies that need those facts weren't checked on them. The
+  server may decide otherwise.
+
+How unknown facts are treated (the policy engine owns these rules):
+- Unknown dev dependency or unknown direct never matches that condition.
+- Unknown runtime counts as a match for `packageInRuntime` in a Protect policy.
+- In a Protect policy, a Kai condition with no Kai result is left out, and the
+  group's other conditions decide. A Protect group with only Kai conditions
+  matches nothing.
+- In a Suppress policy, a group with a Kai condition never matches on the CLI
+  (the CLI never has Kai results), so it hides nothing.
+- "Number of vulnerable packages is at least" no longer exists.
+
+**A policy that could not be fetched is an error, not "no policy".** The scan
+exits 1 (`kodem-cli agent scan` reports it as `10`, `scan-error`). Every
+kodem-cli version prints `[-] Failed to fetch open-source policies: <reason>`,
+or `[-] Failed to fetch code policies: <reason>` for the code scan. Older open-source scans also print `Policy Status: NOT FOUND`
+first, and still exit 1. So read the exit code with the text: `NOT FOUND` with
+exit 0 means no policy; `NOT FOUND` with exit 1 and a `Failed to fetch` line is
+an error. Report which side failed, never say "passed" or "no policy
+configured", and do not block the developer on it.
+
+`kodem-cli scan` exit codes are:
+- `0` — nothing blocks. With `Policy Status: NOT FOUND` printed, there is no
+  policy: say so and report findings by severity.
+- `9` — blocked by policy. This is a verdict, not an error. Fix the findings
+  under each `[FAILED]` policy.
+- `1` (or any other code) — the scan errored, including a policy that could not
+  be fetched even if `NOT FOUND` was printed. Say which side failed. Never
+  report it as passed or as "no policy".
 
 `kodem-cli agent scan` exit codes are:
 - `0` — clean OR non-blocking findings (status in trailer line)

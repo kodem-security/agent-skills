@@ -152,6 +152,7 @@ saving the user tokens.
 | 3 | not authenticated | no-platform tier (Fallback tiers) |
 | 4 | repo not mapped | ask once for the Kodem name, retry with `--repo-name`; else not-mapped tier |
 | 5 | not authorized (key scope) | no-scope tier — don't retry, it won't help |
+| 6 | kodem-cli too old for the report command | run `kodem-cli agent update`, then retry once |
 | 1 | anything else | retry once, then report the command's error to the user |
 
 ## Step 3 — Present and enrich
@@ -173,9 +174,10 @@ it, then add the judgment a command can't:
   `.claude/skills/` and `.claude/plugins/`, the other hosts' plugin install
   directories, and this tool's own skills in any other host's `skills/`) and
   reports how many via `signals.excluded_tool_own_files` — relay that number, don't
-  re-derive it or adjust the totals yourself. Findings elsewhere under those
-  dot-directories (a team's own skills, `.claude/hooks/`) are the developer's own
-  code and are included, as they should be.
+  re-derive it or adjust the totals yourself. Everything under `.claude/skills/`
+  is excluded, a team's own Claude skills included. In the other hosts'
+  `skills/` folders only this tool's own skills are excluded. Other paths, such
+  as `.claude/hooks/`, are the developer's own code and are counted.
 - If the user compares this report to an earlier one: counts can change between
   runs — the platform recomputes fixability and scores continuously. That's
   normal, not a scan error; say so rather than reconciling by hand.
@@ -226,13 +228,13 @@ them under **Missing signals**; your job is to make sure they land:
 - **Empty backlog** → it's clean; policy state still shows; skip the fix offer.
 - **No lockfile for an npm/pnpm/yarn manifest** → the command detects this and
   emits it under **Missing signals**; relay that note, don't re-derive it. The
-  consequence is stronger than stale data: the platform reads the resolved tree
-  out of the lockfile, so those JavaScript dependencies are **not scanned at all**
-  and the manifest contributes **zero findings**. Never present that as clean —
-  say the manifest was not scanned, and recommend committing a lockfile
+  platform reads the resolved tree out of the lockfile, so those dependencies
+  were **probably not scanned**, and a zero count may mean "not scanned", not
+  "clean". For npm the platform tries to build a lockfile itself, so findings may
+  still appear, but don't rely on it. Never present a zero as clean — say the
+  dependencies were probably not scanned, and recommend committing a lockfile
   (`npm install --package-lock-only`, or the ecosystem's install command) and
-  re-running. A repo whose only manifest is unresolved can show a clean report
-  while being entirely unscanned.
+  re-running.
 
 Never fabricate a value the platform didn't return.
 
@@ -288,6 +290,6 @@ Never fabricate a value the platform didn't return.
 
 **Ordering rule**: the findings list is grouped by severity with
 runtime-reachable first and **Kodem Score** ranking within each group; the
-top-priorities list is Kodem Score order, with policy-breaching issues boosted
-and Kai false positives demoted. A user's scope is a *filter* on that layout,
+top-priorities list puts policy-breaching issues first, and inside each part
+Kai false positives last, then Kodem Score order. A user's scope is a *filter* on that layout,
 never a different sort.

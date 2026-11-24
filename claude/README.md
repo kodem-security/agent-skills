@@ -80,10 +80,12 @@ new session before trying anything.
 
 At the end of every agent turn, the bundled hooks scan only what that turn
 changed, locally (`--no-trace`, nothing uploaded). A clean result says nothing.
-A policy-blocked result goes back to the agent with the findings and the rules
-for acting on them: safe dependency bumps it applies, anything bigger it asks
-you about first, and it never silences a finding. It re-scans after a fix, at
-most twice, and stops if the same findings come back.
+Every policy that matches your repository runs, and each finding resolves
+Suppress > Fail > Warn. A result that a policy blocks goes back to the agent
+with the findings and the rules for acting on them: safe dependency bumps it
+applies, anything bigger it asks you about first, and it never silences a
+finding. It re-scans after a fix, at most twice, and stops if the same findings
+come back.
 
 If your Kodem sign-in expires, Claude Code shows one line asking you to run
 `kodem-cli auth login`, and the turn ends normally.

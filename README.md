@@ -6,7 +6,7 @@ of real runtime risk, and your security posture is a question away.
 
 | Skill | What it does |
 | --- | --- |
-| `kodem-security` | Prevention. At the end of each agent turn, scans only what that turn changed against your CI and SCM policies, and hands policy violations back to the agent to fix. |
+| `kodem-security` | Prevention. At the end of each agent turn, scans only what that turn changed against your Kodem policies (every matching policy runs, for CI and pull requests), and hands policy violations back to the agent to fix. |
 | `kodem-backlog-fix` | Fixes the open issues already in Kodem, ranked by Kodem Score, after you approve the plan. |
 | `kodem-report` | Read-only posture summary or full report. Changes nothing. |
 

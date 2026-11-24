@@ -18,11 +18,12 @@ the prevention scan: prevention stops *new* issues in the diff; this clears the
 *existing* backlog.
 
 The goal is **real risk reduced**, not findings closed. That's why everything is
-ordered by **Kodem Score** — Kodem's ranking that weights runtime reachability
-most, then exploitability and severity. You lead with what the platform already
+ordered by **Kodem Score** (issues that breach a policy first) — Kodem's ranking
+that weights runtime reachability most, then exploitability and severity. You lead with what the platform already
 knows (the runtime signal only Kodem's sensor has) instead of re-deriving it.
 
-Default behavior for a bare "fix my issues": the **top 10 by Kodem Score**, with
+Default behavior for a bare "fix my issues": issues that breach a policy first,
+then the rest up to the **top 10 by Kodem Score**, with
 SCA (open-source) filtered to *fixable* and SAST (code) filtered to *not a false
 positive*. Anything more specific (see **Supported requests**) narrows or widens
 that set.
@@ -139,8 +140,9 @@ resolved scope, then combine into one set:
 - **Dedup by issue `id`.** A repo/resource can belong to more than one scope, so
   the same issue comes back from multiple calls — merge, don't concatenate.
 - **Re-rank and re-limit *after* merging.** Pass `--limit 0` on each per-scope call
-  and apply the user's limit only at the end: merge, dedup, sort by `kodemScore`
-  descending, **then** take the top N. This is the one place you deliberately don't
+  and apply the user's limit only at the end: merge, dedup, **then** build the plan
+  per the Ordering rule (breaching issues first, then the rest by `kodemScore` up to
+  N). This is the one place you deliberately don't
   push `--limit` onto the command — a per-scope limit truncates each list before
   the merge, so a high-scoring issue in one scope can lose to lower-scoring ones in
   another. Every other filter (severity, package, …) still goes on every call.
@@ -198,7 +200,8 @@ note under the command below.)
 The command **exits non-zero on every failure**, and prints an error envelope with
 it. Still read the envelope rather than the exit code alone: `error.message` carries
 the detail you need to tell the developer what went wrong, and a `success:false`
-body must never be read as an empty backlog. It always prints a JSON envelope:
+body must never be read as an empty backlog. It always prints a JSON envelope,
+also when you are not signed in:
 - **success:** `{ "success": true, "data": { "project": {...}, "count": N, "total": M, "issues": [...] } }`
 - **failure:** `{ "success": false, "error": { "message": "...", "code": N } }` — `message` carries the full detail, so read it.
 
@@ -211,8 +214,9 @@ On failure, react by the message:
   an **all-resources** read (no `--scope-id`) 403s, or **every** resolved scope
   403s for this repo, does the caller genuinely lack access — switch to the
   **agent-native fallback** (see Fallback tiers). Don't retry the same call.
-- **token expired** (can arrive with exit 0 — see above) → tell the user to run
-  `kodem-cli auth login`, and stop.
+- **not authenticated / token expired** → it exits 1 with a `success:false`
+  envelope too, for example `no credentials were provided`. Tell the user to run
+  `kodem-cli auth login`, and stop. Don't retry.
 - anything else (5xx / network) → **retry once; if it still fails, report the error
   message to the user.**
 
@@ -225,7 +229,8 @@ Each issue carries the signals you rank and present by:
 
 - `kodemScore` — the ranking (issues arrive sorted by it, descending)
 - `category` — `sca` or `sast` (derived for you)
-- `severity`, `riskId` (CVE), `packageName`, `cwe`
+- `severity`, `riskId` (CVE), `packageName`, `cwe`; for SAST also `ruleId` and
+  `filePath`
 - `riskInsights.runtime` (reachable in production), `riskInsights.exploitMaturity`,
   `riskInsights.internetFacing`
 - `fixInsights.hasFixVersion` + `fixVersions[]` — Kodem's computed fix (the
@@ -270,8 +275,6 @@ Each issue carries the signals you rank and present by:
   state how many and that they are the tool's own files — a total that silently
   disagrees with the platform's is worse than a slightly longer sentence.
 
-Then take the top N by Kodem Score (default 10).
-
 **Quick Wins** — a single dependency/base-image update that clears several issues
 at once. Pull them for the repo (the `projectId` comes from any issue in step 2):
 
@@ -282,16 +285,16 @@ kodem-cli issues quick-wins --project "<projectId>" --skill-trigger --json
 Each quick win has `dependencyName`, `currentVersion` → `fixVersion`,
 `totalIssues` (how many issues it clears), and `aggregateKodemScore`.
 
-**Policies — surface, never gate.** Kodem policies (the **CI** rules that gate a
-build and the **SCM** rules that block a PR/MR merge) ride on the scan, not on
-`issues list`. Read them the way the prevention skill does — a policy-aware scan
+**Policies — surface, never gate.** Kodem has one list of policies. Each policy
+runs on CI scans (it gates a build), on pull requests (it blocks a PR/MR merge),
+or both. Policies ride on the scan, not on `issues list`. Read them the way the prevention skill does — a policy-aware scan
 of the repo, which doubles as your **before** snapshot for this run:
 
 **Run both variants.** The subcommand selects the policy family, and
-`--policy-type all` does not widen it: `open-source` returns only the two Open
-Source verdicts and `code` only the two Code verdicts. Running one and reporting
-its result reads as a clean bill of health on the other, so a repo with four
-policies would be described as having two.
+`--policy-type all` does not widen it: `open-source` returns only the Open Source
+verdicts and `code` only the Code verdicts. Running one and reporting its result
+reads as a clean bill of health on the other, so a repo with policies in both
+categories would be described as having half of them.
 
 ```bash
 kodem-cli scan code-repository open-source <repo-root> \
@@ -304,30 +307,70 @@ kodem-cli scan code-repository code <repo-root> \
 ```
 
 Merge the verdicts from both before reporting anything. If one variant errors,
-say which side did not answer — that is not the same as it passing.
+say which side did not answer — that is not the same as it passing. A policy that
+could not be fetched is such an error: the scan exits 1 and prints
+`[-] Failed to fetch open-source policies: …` (or `code`). Older open-source scans
+also print `Policy Status: NOT FOUND` first and still exit 1. Read the exit code
+with the text. `kodem-cli scan` exits with:
+- `0` — nothing blocks. With `Policy Status: NOT FOUND` printed, there is no
+  policy: say so and report findings by severity.
+- `9` — a policy blocks. This is a verdict, not an error. Fix the findings under
+  each `[FAILED]` policy.
+- `1` — the scan errored, including a policy that could not be fetched, even if
+  `NOT FOUND` was printed. Say which side failed. Never report it as passed or as
+  "no policy".
 
-If either scan prints a `KODEM_UPDATE_AVAILABLE: <version>` trailer, a newer
-`kodem-cli` exists. Finish what you're doing first — the current results are still
-valid — then offer the update once, using the same installer as the prerequisite.
-Never loop on it: if the trailer reappears after updating, an older copy is
-shadowing the new one on PATH and the installer names the file to remove.
+`kodem-cli scan` prints no `KODEM_RESULT` or `KODEM_UPDATE_AVAILABLE` trailer
+(only `kodem-cli agent scan` does). If a scan logs that a new kodem-cli version is
+available, finish what you're doing first — the current results are still valid —
+then offer the update once, using the same installer as the prerequisite. Never
+loop on it: if the notice reappears after updating, an older copy is shadowing the
+new one on PATH; on macOS and Linux the installer names the file to remove.
 
-Read the verdict lines — each prefixed with its origin/category (`[CI · Open
-Source]`, `[SCM · Code]`) and a status: `[PASSED]` / `[FAILED]` / `[WARN AND PASS]`
-/ `[PARTIAL]`, or `NOT FOUND` when no policy is configured. The worst verdict wins
-— a passing CI policy won't rescue a failing SCM one. Use it to:
+Read the `Policy result: Fail|Warn|Pass` block (newer CLIs only; older ones print
+just the verdict lines) and the verdict lines — each prefixed
+with its origin/category (`[CI · Open Source]`, `[SCM · Code]`) and a status:
+`[PASSED]` / `[FAILED]` / `[WARN AND PASS]` / `[PARTIAL]`. Only the open-source scan
+prints `Policy Status: NOT FOUND` when no policy is configured; a code scan with no
+code policy prints no `[… · Code]` line and exits 0. **Every matching policy runs**, and each finding resolves
+Suppress > Fail > Warn. A passing policy won't rescue a finding another policy
+fails. The block's `Policy result` is the verdict; each verdict line shows only
+that policy's own result. Findings listed under
+`Suppressed Violations` are hidden by a Suppress policy: they don't breach, and they
+are never ones to fix. Some `[!]` lines mean this CLI doesn't understand part of a
+policy — say so and suggest `kodem-cli agent update`:
+- `[!] Policy note: … type or action this version does not know …: it fails` — an
+  unknown action counts as Fail, so a finding it matches **blocks**.
+- `[!] Policy warning: … cannot read … Update the CLI` — the unreadable part, or
+  the whole policy, was skipped and the rest was checked.
+- `[!] Suppress policy … unknown key` — that Suppress policy **doesn't suppress**.
 
-- **Surface** which policies apply (name CI vs SCM distinctly) and what's currently
-  breaching them, in the orientation (Step 3). **Tag SCA and SAST findings alike.**
-  Code findings breach `[CI · Code]` / `[SCM · Code]` exactly as dependency findings
-  breach the Open Source pair; a plan where every SCA item carries a policy tag and
-  no SAST item does means the code scan was never run, not that code findings breach
-  nothing.
-- **Inform ordering** — a policy-breaching issue rises within the Kodem-Score
-  order — but **never to gate the set**: a high-score issue that breaches no policy
-  is still in scope, and policy never removes issues from consideration.
-- `NOT FOUND` (no policy configured for the repo) → say plainly there are none to
-  surface, and rank on Kodem Score + the per-type filter as usual.
+Others mean the server decides that part, and updating doesn't help: `[PARTIAL]`,
+a warning or note ending `not evaluated in CLI` (an issue or advisory age, i.e. SLA), the
+`Kai results are not available in the CLI` warning, and the warning that the
+platform's runtime and exploit maturity facts could not be fetched.
+Use it to:
+
+- **Surface** which policies apply (name the policy and where it ran, CI or SCM)
+  and what's currently breaching them, in the orientation (Step 3). **Tag SCA and
+  SAST findings alike.** Code findings breach `[CI · Code]` / `[SCM · Code]` exactly
+  as dependency findings breach the Open Source pair; a plan where every SCA item
+  carries a policy tag and no SAST item does means either the code scan was never
+  run or the repo has no code policy (no `[… · Code]` line) — check which, don't
+  assume code findings breach nothing.
+- **Never gate the set** on policy: a high-score issue that breaches no policy is
+  still in scope. Policy can move a breaching issue up the order, but it never
+  removes issues from consideration.
+- No policy configured (`NOT FOUND` on the open-source scan, no `[… · Code]` line on
+  the code scan) → say plainly there are none to surface, and rank on Kodem Score +
+  the per-type filter as usual.
+
+Then build the plan (see Ordering rule): every issue that breaches a policy first,
+then the rest up to N (default 10), each part by Kodem Score. A breaching finding
+can rank past `--limit` and be missing from the list you pulled. For SCA, pull it
+with `--cve <id>` (the id that ends the `violates` line) or `--package <name>` (the
+name before `@`). For SAST there is no rule or file flag: re-pull with
+`--type sast --limit 0` (keep the user's other filters) and find it there.
 
 ## Step 3 — Orient, then show the plan
 
@@ -340,7 +383,7 @@ high-impact work is obvious:
 ```
 Kodem backlog for acme/store-api — 35 open SCA (fixable), 14 SAST (Kai-confirmed)
 Policy: CI Open-Source FAILED (2 findings breach) · SCM Code PASSED
-Top runtime-reachable, highest Kodem Score first:
+Policy breaches first, then highest Kodem Score:
 
 Safe fixes (auto-applicable):
   [HIGH · runtime · policy · score 727]  bump lodash 4.17.11 → 4.17.21  (CVE-2021-23337)
@@ -348,11 +391,11 @@ Safe fixes (auto-applicable):
 Quick Wins (one update clears several):
   bump node 20.10.0 → 20.20.2 — clears 1830 issues (aggregate score 542391)
 Needs your review (major bump / code change):
-  [CRIT · score 664]  express 3.x → 4.x (breaking) — SSRF, review before applying
+  [CRIT · policy · score 664]  express 3.x → 4.x (breaking) — SSRF, review before applying
 ```
 
 Mark the issues that breach a policy (e.g. a `policy` tag as above) so the
-developer sees what CI/SCM would block — but remember policy informs order, it
+developer sees what the policies would block in CI or on a PR — but remember policy informs order, it
 doesn't shrink the set.
 
 Show, per item: severity, a runtime indicator when present, Kodem Score, what it
@@ -361,13 +404,13 @@ Wins**, and **needs review**. Keep it scannable.
 
 Every line is one item the developer can say yes or no to: one dependency bump, or
 one code finding with its file. Don't tally findings into a line ("16× XSS",
-"23 code findings"): list the highest-scoring ones up to the 10-line limit, then
-say how many more there are.
+"23 code findings"): list them in plan order (see Ordering rule) up to the 10-line
+limit, then say how many more there are.
 
 ## Step 4 — Confirm
 
-State the inference you made ("Defaulting to the top 10 by Kodem Score — SCA
-fixable, SAST Kai-confirmed") and ask: **"Fix these? (or: broader / narrow /
+State the inference you made ("Defaulting to policy breaches first, then the top
+10 by Kodem Score — SCA fixable, SAST Kai-confirmed") and ask: **"Fix these? (or: broader / narrow /
 pick specific ones)."** Safe SCA bumps you'll auto-apply; SAST and major bumps
 you'll show and let them decide.
 
@@ -380,8 +423,9 @@ local scan never sees.
 **Check the base image before working through packages one by one.** On a
 containerized repo it is usually the largest share of the backlog and one `FROM`
 line clears many issues at once, so it is the first thing to *look at* — but it does
-not change the ranking (see Ordering rule) and it is **never auto-applied** (see
-Out of scope): always surface it and let the developer decide.
+not change the ranking (only a policy breach does; see Ordering rule) and it is
+**never auto-applied** (see Out of scope): always surface it and let the developer
+decide.
 
 - **Recognize them:** `introducedThroughInsights.fromBaseImage`. The flag is
   tri-state like `isDirect`/`isIndirect` — `true`, `false`, or absent/`null`
@@ -617,9 +661,9 @@ open-source re-scan cannot see a SAST fix. If you changed code and only re-scann
 open-source, you have not confirmed anything you did; say so rather than reporting
 the fix as verified.
 
-Read the result the same way as the Step 2 baseline: the `[CI · …]` / `[SCM · …]`
-policy verdict lines plus the `KODEM_RESULT: <clean|warn|blocked>` trailer; the
-scan exits non-zero when it errors or a policy blocks. Do at most **two**
+Read the result the same way as the Step 2 baseline: the `Policy result` block, the
+`[CI · …]` / `[SCM · …]` policy verdict lines and the exit code: `0` nothing
+blocks, `9` a policy blocks, `1` the scan errored. Do at most **two**
 fix→re-scan cycles; if issues remain, show them and ask how to proceed.
 **That budget is shared with the end-of-turn gate**, which re-scans at the turn
 boundary and also caps itself at two. Count its rounds as your own: two cycles in
@@ -645,15 +689,15 @@ Then hand back:
 
 | The user says | What you do |
 | --- | --- |
-| "fix my issues" / "fix the backlog" *(default)* | Top 10 by Kodem Score, SCA fixable + SAST Kai-confirmed. State the inference. |
-| "fix all my issues" / "everything fixable" | Every safely-fixable issue, runtime-ordered. |
-| "fix all critical and high" | `--severity CRITICAL,HIGH`, fixable, runtime-first. |
+| "fix my issues" / "fix the backlog" *(default)* | Policy breaches first, then the top 10 by Kodem Score, SCA fixable + SAST Kai-confirmed. State the inference. |
+| "fix all my issues" / "everything fixable" | Every safely-fixable issue, ordered per the Ordering rule. |
+| "fix all critical and high" | `--severity CRITICAL,HIGH`, fixable, ordered per the Ordering rule. |
 | "fix runtime high and critical" / "only the reachable ones" | `--runtime` + severity; runtime-reachable only. |
 | "just the dependencies" / "only SAST" | `--type sca` or `--type sast`. |
 | "fix everything from lodash" | `--package lodash` — all of that package's issues, together. |
 | "just the safe patch bumps" | Fixable issues whose `remediationEffort` is `patch`, applied together. |
 | "grab the quick wins" | Pull the repo's Quick Wins. Apply dependency ones like any safe bump; for a base-image Quick Win, update the Dockerfile `FROM` line (this counts as the explicit ask — see Out of scope). |
-| "fix my policy violations" / "fix what's blocking CI" | Read the policy verdict from **both** Step 2 scans, scope to the issues under each `[FAILED]` CI/SCM policy, fix those first. **Code policies count** — a repo can breach `[CI · Code]` / `[SCM · Code]` as well as the Open Source pair, and those breaches are usually SAST findings, which still follow Step 5's approval rule rather than being auto-applied. If `NOT FOUND` on both, say there are no policies configured and offer the default fix instead. |
+| "fix my policy violations" / "fix what's blocking CI" | Read the policy verdict from **both** Step 2 scans, scope to the issues under each `[FAILED]` policy (CI or SCM), fix those first. Skip findings a Suppress policy hides; they don't block. **Code policies count** — a repo can breach `[CI · Code]` / `[SCM · Code]` as well as the Open Source pair, and those breaches are usually SAST findings, which still follow Step 5's approval rule rather than being auto-applied. If there is no policy on either scan (`NOT FOUND` on open-source, no `[… · Code]` line on code), say there are no policies configured and offer the default fix instead. |
 | "fix CVE-2024-3094" | `--cve CVE-2024-3094`. Say so if absent or not fixable. |
 | "fix the lodash prototype pollution one" | Fuzzy-match by package/CWE/title — pull the full backlog first (see note), confirm the match, then fix. |
 | a pasted Kodem issue link | Decode the issue id from the `g` query param (base64 → JSON `{"id": "..."}`), then locate that exact issue (see note) and fix it. |
@@ -661,9 +705,23 @@ Then hand back:
 | "fix 30 issues" | `--limit 30` instead of 10. |
 | "what's my posture?" / "what should I prioritize?" / "full report" | Read-only — not this skill: hand to the **kodem-report** skill (same data pull, zero changes, ends by offering to hand back here). |
 
-**Ordering rule:** always rank by **Kodem Score** (the CLI's default order). A
-user's specific ask (runtime-only, critical/high, one package) is a *filter*
-applied on top of that order — never a different sort.
+**Ordering rule:** rank by **Kodem Score** (the CLI's default order), with one
+exception: issues that breach a policy come first. So the order is breaching
+issues by Kodem Score, then the rest by Kodem Score; inside each plan group (safe
+fixes, Quick Wins, needs review) the same order holds. An issue **breaches** when
+a Step 2 scan lists it as a `violates …` line under any `[FAILED]` policy — even if
+a Warn policy also lists it (Warn policies print `matches`, not `violates`). Lines
+under `Suppressed Violations` never breach, and a `[PARTIAL]` policy lists no
+breaches. Match the line to the issue:
+- SCA (`pkg@1.2.3 violates … - CVE-…`): the id after the final ` - ` is the
+  issue's `riskId`, and the text before `@` is its `packageName`. When the line has
+  no trailing id (`… violates malicious package rule (MAL-…)`), match the package
+  and the id in the parentheses.
+- SAST (`violates … in <path> [<rule>] …`): the rule in `[…]` is the issue's
+  `ruleId`, and the path after `in` is its `filePath`.
+
+A user's specific ask (runtime-only, critical/high, one package) is a
+*filter* applied on top of that order — never a different sort.
 
 **Note — locating one specific issue (pasted link, fuzzy match).** There's no
 "fetch one issue by id" command, and the default list is capped by `--limit`. So
@@ -705,7 +763,7 @@ The skill never silently does less; when context is missing, it says so in one s
 - **Kai not enabled**: no code verdict, so you can't filter SAST
   confirmed-vs-false-positive — rank SAST by Kodem Score / severity, flag that
   verdicts are unavailable, and recommend review before fixing.
-- **No policies configured** (`NOT FOUND`): nothing changes about the fix flow —
+- **No policies configured** (`NOT FOUND` on open-source, no `[… · Code]` line on code): nothing changes about the fix flow —
   still rank by Kodem Score + the per-type filter — just say there are no policies
   to surface.
 - **No platform access**: this skill can't run (say so). Prevention still works
